@@ -116,7 +116,7 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
     Ok(None)
 }
 
-fn manual_trap(vector: usize) {
+fn manual_trap(_vector: usize) {
     todo!();
 }
 

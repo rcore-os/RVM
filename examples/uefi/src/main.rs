@@ -50,14 +50,14 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
 }
 
 #[no_mangle]
-extern "C" fn alloc_frame() -> Option<usize> {
+extern "C" fn alloc_frame() -> usize {
     let st = unsafe { &*uefi_services::system_table().as_ptr() };
     let paddr = st
         .boot_services()
         .allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, 1)
         .expect_success("failed to allocate pages");
     trace!("alloc_frame: {:#x}", paddr);
-    Some(paddr as usize)
+    paddr as usize
 }
 
 #[no_mangle]

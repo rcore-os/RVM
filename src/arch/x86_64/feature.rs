@@ -199,8 +199,6 @@ pub fn x86_feature_init() -> () {
     }
     info!("[RVM] X86 VENDOR is {:?}", *S_X86_VENDOR.lock());
 
-    drop(cpuid0);
-
     /* read in the base cpuids */
     for i in 1..=max_cpuid {
         let mut data: cpuid_leaf = Default::default();
@@ -228,8 +226,6 @@ pub fn x86_feature_init() -> () {
     *S_MAX_EXT_CPUID.lock() = max_ext_cpuid;
 
     info!("[RVM] max extended cpuid 0x{:x}", max_ext_cpuid);
-
-    drop(cpuid_base);
 
     /* read in the extended cpuids */
     for i in (x86_cpuid_leaf_num::X86_CPUID_EXT_BASE as u32)..=max_ext_cpuid {
@@ -259,8 +255,6 @@ pub fn x86_feature_init() -> () {
     *S_MAX_HYP_CPUID.lock() = max_hyp_cpuid;
 
     info!("[RVM] max hypervisor cpuid 0x{:x}", max_hyp_cpuid);
-
-    drop(cpuid_hyp);
 
     for i in (x86_cpuid_leaf_num::X86_CPUID_HYP_BASE as u32)..=max_hyp_cpuid {
         let index = i - (x86_cpuid_leaf_num::X86_CPUID_HYP_BASE as u32);

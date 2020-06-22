@@ -1,4 +1,4 @@
-#![allow(non_upper_case_globals)]
+#![allow(dead_code, non_upper_case_globals)]
 
 pub const PAGE_SIZE: usize = 0x1000;
 
