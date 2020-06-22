@@ -34,18 +34,18 @@ impl PitTimer {
     }
 
     fn count_to_us(&self) -> usize {
-        (self.count as u64 * 1000_000u64 / Self::FREQ as u64) as usize
+        (self.count as u64 * 1_000_000u64 / Self::FREQ as u64) as usize
     }
 
     pub fn read(&mut self) -> u8 {
         match self.read_state {
             Lsb => {
                 self.read_state = Msb;
-                return (self.count & 0xff) as u8;
+                (self.count & 0xff) as u8
             }
             Msb => {
                 self.read_state = Lsb;
-                return (self.count >> 8) as u8;
+                (self.count >> 8) as u8
             }
         }
     }

@@ -239,6 +239,7 @@ impl Vcpu {
     }
 
     /// Setup VMCS host state.
+    #[allow(unreachable_code, unused_variables, unused_mut)]
     unsafe fn init_vmcs_host(&self, vmcs: &mut AutoVmcs) -> RvmResult<()> {
         vmcs.write64(HOST_IA32_PAT, Msr::new(msr::IA32_PAT).read());
         vmcs.write64(HOST_IA32_EFER, Msr::new(msr::IA32_EFER).read());

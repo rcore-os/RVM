@@ -75,8 +75,8 @@ pub struct x86_cpuid_bit {
 const fn X86_CPUID_BIT(leaf: u32, word: u8, bit: u8) -> x86_cpuid_bit {
     x86_cpuid_bit {
         leaf_num: leaf,
-        word: word,
-        bit: bit,
+        word,
+        bit,
     }
 }
 #[allow(non_snake_case)]
@@ -149,7 +149,7 @@ pub union VendorInfo {
     pub vendor_id: [u32; 3],
     pub vendor_string: [u8; 12],
 }
-pub fn x86_feature_init() -> () {
+pub fn x86_feature_init() {
     if S_INITIALIZED.swap(true, Ordering::Relaxed) {
         return;
     }
@@ -368,12 +368,12 @@ fn get_microarch(info: &x86_model_info) -> x86_microarch_list {
 
 fn x86_intel_get_patch_level() -> u32 {
     warn!("[RVM] running unimplemented fn x86_intel_get_patch_level");
-    return 0;
+    0
 }
 
 fn x86_amd_get_patch_level() -> u32 {
     warn!("[RVM] running unimplemented fn x86_amd_get_patch_level");
-    return 0;
+    0
 }
 
 fn x86_get_cpuid_leaf(
@@ -385,23 +385,23 @@ fn x86_get_cpuid_leaf(
         if leaf > *S_MAX_CPUID.lock() {
             return None;
         }
-        return Some((&S_CPUID, leaf as usize));
+        Some((&S_CPUID, leaf as usize))
     } else if leaf < x86_cpuid_leaf_num::X86_CPUID_EXT_BASE as u32 {
         if leaf > *S_MAX_HYP_CPUID.lock() {
             return None;
         }
-        return Some((
+        Some((
             &S_CPUID_HYP,
             (leaf - x86_cpuid_leaf_num::X86_CPUID_HYP_BASE as u32) as usize,
-        ));
+        ))
     } else {
         if leaf > *S_MAX_EXT_CPUID.lock() {
             return None;
         }
-        return Some((
+        Some((
             &S_CPUID_EXT,
             (leaf - x86_cpuid_leaf_num::X86_CPUID_EXT_BASE as u32) as usize,
-        ));
+        ))
     }
 }
 
@@ -422,7 +422,7 @@ pub fn x86_get_cpuid_subleaf(num: x86_cpuid_leaf_num, subleaf: u32, leaf: &mut c
     leaf.b = res.ebx;
     leaf.c = res.ecx;
     leaf.d = res.edx;
-    return true;
+    true
 }
 
 fn x86_feature_test(bit: x86_cpuid_bit) -> bool {

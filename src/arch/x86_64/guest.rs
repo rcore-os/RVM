@@ -23,7 +23,7 @@ impl Guest {
         VMM_STATE.lock().alloc()?;
         Ok(Arc::new(Self {
             page_table: RwLock::new(EPageTable::new()),
-            traps: RwLock::new(TrapMap::new()),
+            traps: RwLock::new(TrapMap::default()),
         }))
     }
 

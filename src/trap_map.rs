@@ -40,7 +40,7 @@ impl Trap {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TrapMap {
     #[cfg(target_arch = "x86_64")]
     io_traps: BTreeMap<usize, Trap>,
@@ -48,14 +48,6 @@ pub struct TrapMap {
 }
 
 impl TrapMap {
-    pub fn new() -> Self {
-        Self {
-            #[cfg(target_arch = "x86_64")]
-            io_traps: BTreeMap::new(),
-            mem_traps: BTreeMap::new(),
-        }
-    }
-
     pub fn find(&self, kind: TrapKind, addr: usize) -> Option<Trap> {
         let traps = match kind {
             #[cfg(target_arch = "x86_64")]

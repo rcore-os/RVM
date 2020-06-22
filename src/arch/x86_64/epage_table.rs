@@ -32,7 +32,7 @@ impl EPageTable {
         eptp.set_memory_type(6);
         eptp.set_page_walk_length(3);
         eptp.set_epage_table_root(self.ept_page_root);
-        return eptp.value();
+        eptp.value()
     }
 
     /// Map a guest physical page to host physical page.

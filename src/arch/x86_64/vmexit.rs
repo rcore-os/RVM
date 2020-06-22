@@ -16,8 +16,7 @@ type ExitResult = RvmResult<Option<RvmExitPacket>>;
 const K_HYP_VENDOR_ID: VendorInfo = VendorInfo {
     vendor_string: [
         // "KVMKVMKVM\0\0\0"
-        'K' as u8, 'V' as u8, 'M' as u8, 'K' as u8, 'V' as u8, 'M' as u8, 'K' as u8, 'V' as u8,
-        'M' as u8, 0u8, 0u8, 0u8,
+        b'K', b'V', b'M', b'K', b'V', b'M', b'K', b'V', b'M', 0u8, 0u8, 0u8,
     ],
 };
 

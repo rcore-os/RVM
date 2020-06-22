@@ -5,6 +5,7 @@
 #![feature(linkage)]
 #![feature(naked_functions)]
 #![feature(untagged_unions)]
+#![deny(warnings)]
 
 #[macro_use]
 extern crate alloc;
