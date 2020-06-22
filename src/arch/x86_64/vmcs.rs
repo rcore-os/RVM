@@ -533,6 +533,7 @@ pub struct AutoVmcs {
 
 impl AutoVmcs {
     pub fn new(phys_addr: u64) -> RvmResult<Self> {
+        x86_64::instructions::interrupts::disable();
         unsafe {
             if vmx::vmptrld(phys_addr).is_err() {
                 Err(RvmError::DeviceError)

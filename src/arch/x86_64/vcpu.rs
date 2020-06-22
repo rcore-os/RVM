@@ -622,7 +622,7 @@ impl Drop for Vcpu {
 
 #[naked]
 #[inline(never)]
-unsafe fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> {
+unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> {
     llvm_asm!("
     // Store host callee save registers, return address, and processor flags.
     pushf
@@ -691,7 +691,7 @@ unsafe fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> {
 /// stack and registers to the state they were in when vmx_entry was called.
 #[naked]
 #[inline(never)]
-unsafe fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
+unsafe extern "sysv64" fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
     llvm_asm!("
     // Store the guest registers not covered by the VMCS. At this point,
     // vmx_state is in RSP.

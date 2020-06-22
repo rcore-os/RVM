@@ -7,13 +7,46 @@ extern crate alloc;
 extern crate log;
 extern crate rlibc;
 
+use rvm::{Guest, Vcpu};
 use uefi::prelude::*;
+use uefi::table::boot::*;
 
 #[entry]
 fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
     // Initialize utilities (logging, memory allocation...)
     uefi_services::init(&st).expect_success("failed to initialize utilities");
-
+    // log::set_max_level(log::LevelFilter::Trace);
     info!("RVM example");
+
+    let guest = Guest::new().unwrap();
+    let mut vcpu = Vcpu::new(0, guest.clone()).unwrap();
+    vcpu.resume().unwrap();
+
     panic!();
+}
+
+#[no_mangle]
+extern "C" fn alloc_frame() -> Option<usize> {
+    let st = unsafe { &*uefi_services::system_table().as_ptr() };
+    let paddr = st
+        .boot_services()
+        .allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, 1)
+        .expect_success("failed to allocate pages");
+    trace!("alloc_frame: {:#x}", paddr);
+    Some(paddr as usize)
+}
+
+#[no_mangle]
+extern "C" fn dealloc_frame(paddr: usize) {
+    let st = unsafe { &*uefi_services::system_table().as_ptr() };
+    st.boot_services()
+        .free_pages(paddr as u64, 1)
+        .expect_success("failed to free pages");
+    trace!("dealloc_frame: {:#x}", paddr);
+}
+
+/// Convert physical address to virtual address
+#[no_mangle]
+extern "C" fn phys_to_virt(paddr: usize) -> usize {
+    paddr
 }

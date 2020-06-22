@@ -19,8 +19,7 @@ mod memory;
 mod packet;
 mod trap_map;
 
-pub use arch::Guest;
-pub use arch::Vcpu;
+pub use arch::{Guest, Vcpu};
 
 pub type RvmResult<T = ()> = Result<T, RvmError>;
 

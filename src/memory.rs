@@ -2,21 +2,25 @@ pub type GuestPhysAddr = usize;
 pub type HostPhysAddr = usize;
 pub type HostVirtAddr = usize;
 
-#[no_mangle]
-#[linkage = "weak"]
-pub extern "C" fn alloc_frame() -> Option<HostPhysAddr> {
-    unimplemented!()
+pub fn alloc_frame() -> Option<HostPhysAddr> {
+    unsafe { ffi::alloc_frame() }
 }
 
-#[no_mangle]
-#[linkage = "weak"]
-pub extern "C" fn dealloc_frame(_paddr: HostPhysAddr) {
-    unimplemented!()
+pub fn dealloc_frame(paddr: HostPhysAddr) {
+    unsafe { ffi::dealloc_frame(paddr) }
 }
 
 /// Convert physical address to virtual address
-#[no_mangle]
-#[linkage = "weak"]
-pub extern "C" fn phys_to_virt(_paddr: HostPhysAddr) -> HostVirtAddr {
-    unimplemented!()
+pub fn phys_to_virt(paddr: HostPhysAddr) -> HostVirtAddr {
+    unsafe { ffi::phys_to_virt(paddr) }
+}
+
+mod ffi {
+    use super::*;
+
+    extern "C" {
+        pub fn alloc_frame() -> Option<HostPhysAddr>;
+        pub fn dealloc_frame(_paddr: HostPhysAddr);
+        pub fn phys_to_virt(_paddr: HostPhysAddr) -> HostVirtAddr;
+    }
 }

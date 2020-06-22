@@ -102,10 +102,7 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
     trace!("[RVM] VM exit: External interrupt {:#x?}", info);
     debug_assert!(info.valid);
     debug_assert!(info.interruption_type == 0);
-    extern "C" {
-        fn manual_trap(vector: usize);
-    }
-    unsafe { manual_trap(info.vector as usize) };
+    manual_trap(info.vector as usize);
 
     use super::consts as int_num;
     match info.vector - int_num::IRQ0 {
@@ -117,6 +114,10 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
     };
 
     Ok(None)
+}
+
+fn manual_trap(vector: usize) {
+    todo!();
 }
 
 fn handle_interrupt_window(vmcs: &mut AutoVmcs) -> ExitResult {

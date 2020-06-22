@@ -373,12 +373,12 @@ fn get_microarch(info: &x86_model_info) -> x86_microarch_list {
 }
 
 fn x86_intel_get_patch_level() -> u32 {
-    info!("[RVM] WARNING: running unimplemented fn x86_intel_get_patch_level");
+    warn!("[RVM] running unimplemented fn x86_intel_get_patch_level");
     return 0;
 }
 
 fn x86_amd_get_patch_level() -> u32 {
-    info!("[RVM] WARNING: running unimplemented fn x86_amd_get_patch_level");
+    warn!("[RVM] running unimplemented fn x86_amd_get_patch_level");
     return 0;
 }
 

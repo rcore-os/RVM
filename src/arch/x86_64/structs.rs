@@ -118,7 +118,10 @@ pub struct VmmState {
 }
 
 lazy_static! {
-    pub static ref VMM_STATE: Mutex<VmmState> = Mutex::new(VmmState::default());
+    pub static ref VMM_STATE: Mutex<VmmState> = {
+        assert!(super::check_hypervisor_feature());
+        Mutex::new(VmmState::default())
+    };
 }
 
 impl VmmState {
