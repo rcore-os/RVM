@@ -7,7 +7,7 @@ extern crate alloc;
 extern crate log;
 extern crate rlibc;
 
-use rvm::{Guest, Vcpu};
+use rvm::*;
 use uefi::prelude::*;
 use uefi::table::boot::*;
 
@@ -20,7 +20,31 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
 
     let guest = Guest::new().unwrap();
     let mut vcpu = Vcpu::new(0, guest.clone()).unwrap();
-    vcpu.resume().unwrap();
+
+    vcpu.write_state(&vcpu::GuestState {
+        xcr0: 0,
+        cr2: 0,
+        rax: 1,
+        rbx: 2,
+        rcx: 3,
+        rdx: 4,
+        rbp: 5,
+        rsi: 6,
+        rdi: 7,
+        r8: 8,
+        r9: 9,
+        r10: 10,
+        r11: 11,
+        r12: 12,
+        r13: 13,
+        r14: 14,
+        r15: 15,
+    })
+    .unwrap();
+
+    vcpu.resume();
+
+    info!("{:#x?}", vcpu.read_state().unwrap());
 
     panic!();
 }

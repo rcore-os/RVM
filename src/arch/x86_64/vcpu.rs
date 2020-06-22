@@ -11,6 +11,7 @@ use super::{
 use crate::interrupt::InterruptController;
 use crate::{packet::RvmExitPacket, RvmError, RvmResult};
 use alloc::{boxed::Box, sync::Arc};
+use core::fmt::{Debug, Formatter, Result};
 use core::sync::atomic::{AtomicBool, Ordering};
 use x86::{bits64::vmx, msr};
 use x86_64::{
@@ -47,9 +48,9 @@ pub struct GuestState {
     pub cr2: u64,
     //  RIP, RSP, and RFLAGS are automatically saved by VMX in the VMCS.
     pub rax: u64,
+    pub rbx: u64,
     pub rcx: u64,
     pub rdx: u64,
-    pub rbx: u64,
     pub rbp: u64,
     pub rsi: u64,
     pub rdi: u64,
@@ -576,8 +577,8 @@ impl Vcpu {
 
             res.map_err(|err| {
                 warn!(
-                    "[RVM] VCPU resume failed: {:#x}",
-                    vmcs.read32(VmcsField32::VM_INSTRUCTION_ERROR)
+                    "[RVM] VCPU resume failed: {:?}",
+                    VmInstructionError::from(vmcs.read32(VmcsField32::VM_INSTRUCTION_ERROR))
                 );
                 err
             })?;
@@ -640,13 +641,13 @@ unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> 
     mov     rsp, rdi
 
     // Load the guest registers not covered by the VMCS.
-    add     rsp, 8      // skip xcr0
+    add     rsp, 16      // skip xcr0
     pop     rax
     mov     cr2, rax
     pop     rax
+    pop     rbx
     pop     rcx
     pop     rdx
-    pop     rbx
     pop     rbp
     pop     rsi
     pop     rdi
@@ -708,9 +709,9 @@ unsafe extern "sysv64" fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
     push    rdi
     push    rsi
     push    rbp
-    push    rbx
     push    rdx
     push    rcx
+    push    rbx
     push    rax
     mov     rax, cr2
     push    rax
@@ -766,5 +767,60 @@ pub unsafe fn invept(invalidation: InvEptType, eptp: u64) -> Option<()> {
         None
     } else {
         Some(())
+    }
+}
+
+struct VmInstructionError {
+    number: u32,
+}
+
+impl VmInstructionError {
+    fn explain(&self) -> &str {
+        match self.number {
+            0 => "OK",
+            1 => "VMCALL executed in VMX root operation",
+            2 => "VMCLEAR with invalid physical address",
+            3 => "VMCLEAR with VMXON pointer",
+            4 => "VMLAUNCH with non-clear VMCS",
+            5 => "VMRESUME with non-launched VMCS",
+            6 => "VMRESUME after VMXOFF (VMXOFF and VMXON between VMLAUNCH and VMRESUME)",
+            7 => "VM entry with invalid control field(s)",
+            8 => "VM entry with invalid host-state field(s)",
+            9 => "VMPTRLD with invalid physical address",
+            10 => "VMPTRLD with VMXON pointer",
+            11 => "VMPTRLD with incorrect VMCS revision identifier",
+            12 => "VMREAD/VMWRITE from/to unsupported VMCS component",
+            13 => "VMWRITE to read-only VMCS component",
+            15 => "VMXON executed in VMX root operation",
+            16 => "VM entry with invalid executive-VMCS pointer",
+            17 => "VM entry with non-launched executive VMCS",
+            18 => "VM entry with executive-VMCS pointer not VMXON pointer (when attempting to deactivate the dual-monitor treatment of SMIs and SMM)",
+            19 => "VMCALL with non-clear VMCS (when attempting to activate the dual-monitor treatment of SMIs and SMM)",
+            20 => "VMCALL with invalid VM-exit control fields",
+            22 => "VMCALL with incorrect MSEG revision identifier (when attempting to activate the dual-monitor treatment of SMIs and SMM)",
+            23 => "VMXOFF under dual-monitor treatment of SMIs and SMM",
+            24 => "VMCALL with invalid SMM-monitor features (when attempting to activate the dual-monitor treatment of SMIs and SMM)",
+            25 => "VM entry with invalid VM-execution control fields in executive VMCS (when attempting to return from SMM)",
+            26 => "VM entry with events blocked by MOV SS",
+            28 => "Invalid operand to INVEPT/INVVPID",
+            _ => "[INVALID]",
+        }
+    }
+}
+
+impl From<u32> for VmInstructionError {
+    fn from(x: u32) -> Self {
+        VmInstructionError { number: x }
+    }
+}
+
+impl Debug for VmInstructionError {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        write!(
+            f,
+            "VmInstructionError({}, {:?})",
+            self.number,
+            self.explain()
+        )
     }
 }

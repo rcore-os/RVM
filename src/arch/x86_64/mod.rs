@@ -4,11 +4,11 @@ mod consts;
 mod epage_table;
 mod exit_reason;
 mod feature;
-mod guest;
+pub mod guest;
 mod msr;
 mod structs;
 mod timer;
-mod vcpu;
+pub mod vcpu;
 mod vmcs;
 mod vmexit;
 
