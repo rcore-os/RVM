@@ -6,14 +6,13 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::RwLock;
 
-use rcore_memory::memory_set::handler::{FrameAllocator, MemoryHandler};
 use rcore_memory::memory_set::MemoryAttr;
 use rcore_memory::paging::PageTable;
-use rcore_memory::{Page, PAGE_SIZE};
+use x86_64::structures::paging::{FrameAllocator, Size4KiB};
 
+use super::consts::PAGE_SIZE;
 use super::epage_table::EPageTable;
-use crate::memory::GlobalFrameAlloc;
-use crate::rvm::{RvmError, RvmResult};
+use crate::{RvmError, RvmResult};
 
 pub type GuestPhysAddr = usize;
 pub type HostPhysAddr = usize;
@@ -137,7 +136,7 @@ impl GuestPhysicalMemorySet {
     /// Clear and unmap all areas
     fn clear(&mut self) {
         // TODO
-        println!("[RVM] clear {:#x?}", self);
+        info!("[RVM] clear {:#x?}", self);
         self.areas.clear();
     }
 
@@ -190,14 +189,14 @@ impl Drop for GuestPhysicalMemorySet {
 
 /// used for mapping vmm's virtual memory to guest os's physical memory
 #[derive(Debug, Clone)]
-pub struct RvmPageTableHandlerDelay<T: FrameAllocator> {
+pub struct RvmPageTableHandlerDelay<T: FrameAllocator<Size4KiB>> {
     guest_start_paddr: GuestPhysAddr,
     host_start_vaddr: HostVirtAddr,
     gpm: Arc<RwLock<GuestPhysicalMemorySet>>,
     allocator: T,
 }
 
-impl<T: FrameAllocator> RvmPageTableHandlerDelay<T> {
+impl<T: FrameAllocator<Size4KiB>> RvmPageTableHandlerDelay<T> {
     pub fn new(
         guest_start_paddr: GuestPhysAddr,
         host_start_vaddr: HostVirtAddr,
@@ -213,7 +212,7 @@ impl<T: FrameAllocator> RvmPageTableHandlerDelay<T> {
     }
 }
 
-impl<T: FrameAllocator> MemoryHandler for RvmPageTableHandlerDelay<T> {
+impl<T: FrameAllocator<Size4KiB>> MemoryHandler for RvmPageTableHandlerDelay<T> {
     fn box_clone(&self) -> Box<dyn MemoryHandler> {
         Box::new(self.clone())
     }

@@ -3,7 +3,7 @@
 use alloc::collections::BTreeMap;
 use core::convert::TryFrom;
 
-use crate::rvm::{RvmError, RvmResult};
+use crate::{RvmError, RvmResult};
 
 #[repr(u32)]
 #[allow(dead_code)]

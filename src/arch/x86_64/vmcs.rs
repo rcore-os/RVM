@@ -3,8 +3,7 @@
 use bitflags::bitflags;
 use x86_64::{instructions::vmx, PhysAddr};
 
-use crate::arch::interrupt;
-use crate::rvm::{RvmError, RvmResult};
+use crate::{RvmError, RvmResult};
 
 /// 16-Bit VMCS Fields.
 #[repr(usize)]
@@ -494,7 +493,7 @@ bitflags! {
 
 impl InterruptionInfo {
     fn has_error_code(vector: u8) -> bool {
-        use crate::arch::interrupt::consts as int_num;
+        use super::consts as int_num;
         match vector {
             int_num::DoubleFault
             | int_num::InvalidTSS
@@ -508,7 +507,7 @@ impl InterruptionInfo {
     }
 
     fn from_vector(vector: u8) -> Self {
-        use crate::arch::interrupt::consts as int_num;
+        use super::consts as int_num;
         let mut info = unsafe { Self::from_bits_unchecked(vector as u32) } | Self::VALID;
         match vector {
             int_num::NonMaskableInterrupt => info |= Self::TYPE_NMI,
@@ -530,21 +529,16 @@ impl InterruptionInfo {
 #[derive(Debug)]
 pub struct AutoVmcs {
     vmcs_paddr: u64,
-    interrupt_flags: usize,
 }
 
 impl AutoVmcs {
     pub fn new(phys_addr: PhysAddr) -> RvmResult<Self> {
         unsafe {
-            let interrupt_flags = interrupt::disable_and_store();
             if vmx::vmptrld(phys_addr).is_none() {
-                interrupt::restore(interrupt_flags);
                 Err(RvmError::DeviceError)
             } else {
-                trace!("[RVM] interrupts disabled");
                 Ok(Self {
                     vmcs_paddr: phys_addr.as_u64(),
-                    interrupt_flags,
                 })
             }
         }
@@ -669,12 +663,5 @@ impl AutoVmcs {
                 );
             }
         }
-    }
-}
-
-impl Drop for AutoVmcs {
-    fn drop(&mut self) {
-        unsafe { interrupt::restore(self.interrupt_flags) };
-        trace!("[RVM] interrupts enabled");
     }
 }

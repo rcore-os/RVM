@@ -4,8 +4,9 @@
 #![allow(dead_code)]
 
 use rcore_memory::memory_set::handler::FrameAllocator;
-use rcore_memory::PAGE_SIZE;
+use x86_64::structures::paging::{FrameAllocator, Size4KiB};
 
+use super::consts::PAGE_SIZE;
 use super::guest_phys_memory_set::{GuestPhysAddr, HostPhysAddr};
 use crate::memory::phys_to_virt;
 
@@ -13,16 +14,16 @@ const MASK_PAGE_ALIGNED: usize = PAGE_SIZE - 1;
 
 /// Extended page table
 #[derive(Debug)]
-pub struct EPageTable<T: FrameAllocator> {
+pub struct EPageTable<T: FrameAllocator<Size4KiB>> {
     allocator: T,
     ept_page_root: HostPhysAddr,
 }
 
-impl<T: FrameAllocator> EPageTable<T> {
+impl<T: FrameAllocator<Size4KiB>> EPageTable<T> {
     /// Create a new EPageTable
     ///
     /// # Arguments
-    ///     * allocator: FrameAllocator
+    ///     * allocator: FrameAllocator<Size4KiB>
     pub fn new(allocator: T) -> Self {
         let mut epage_table = Self {
             allocator,
@@ -109,7 +110,7 @@ impl<T: FrameAllocator> EPageTable<T> {
     }
 }
 
-impl<T: FrameAllocator> Drop for EPageTable<T> {
+impl<T: FrameAllocator<Size4KiB>> Drop for EPageTable<T> {
     fn drop(&mut self) {
         self.unbuild();
     }
@@ -140,7 +141,6 @@ pub struct EPageEntry {
 
 impl EPageEntry {
     fn new(hpaaddr: HostPhysAddr) -> Self {
-        assert_eq!(PAGE_SIZE, 4096); // TODO
         Self { hpaaddr }
     }
     fn get_value(&self) -> usize {

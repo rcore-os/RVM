@@ -9,9 +9,9 @@ use super::feature::*;
 use super::guest_phys_memory_set::GuestPhysicalMemorySet;
 use super::vcpu::{GuestState, InterruptState};
 use super::vmcs::*;
-use crate::rvm::packet::*;
-use crate::rvm::trap_map::{TrapKind, TrapMap};
-use crate::rvm::{RvmError, RvmResult};
+use crate::packet::*;
+use crate::trap_map::{TrapKind, TrapMap};
+use crate::{RvmError, RvmResult};
 
 type ExitResult = RvmResult<Option<RvmExitPacket>>;
 
@@ -109,7 +109,7 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
     }
     unsafe { manual_trap(info.vector as usize) };
 
-    use crate::arch::interrupt::consts as int_num;
+    use super::consts as int_num;
     match info.vector - int_num::IRQ0 {
         int_num::Timer => interrupt_state.timer_irq(),
         int_num::COM1 => interrupt_state
@@ -326,7 +326,7 @@ fn handle_vmcall(
         guest_state.rsi,
     ];
     guest_state.rax = 0;
-    println!("[RVM] VM exit: VMCALL({:#x}) args: {:x?}", num, args);
+    info!("[RVM] VM exit: VMCALL({:#x}) args: {:x?}", num, args);
     Ok(None)
 }
 
@@ -352,7 +352,7 @@ fn handle_io_instruction(
         // QEMU debug port
         0x402 => {
             if !io_info.input {
-                print!("{}", guest_state.rax as u8 as char);
+                info!("{}", guest_state.rax as u8 as char);
             }
             return Ok(None);
         }
@@ -463,11 +463,7 @@ pub fn vmexit_handler(
     traps: &RwLock<TrapMap>,
 ) -> ExitResult {
     let exit_info = ExitInfo::from(vmcs);
-    trace!(
-        "[RVM] VM exit: {:#x?} @ CPU{}",
-        exit_info,
-        crate::arch::cpu::id()
-    );
+    trace!("[RVM] VM exit: {:#x?}", exit_info,);
 
     let res = match exit_info.exit_reason {
         ExitReason::EXTERNAL_INTERRUPT => handle_external_interrupt(vmcs, interrupt_state),

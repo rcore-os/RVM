@@ -3,6 +3,7 @@
 use super::vcpu::GuestState;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
+use lazy_static::lazy_static;
 use spin::Mutex;
 
 pub fn cpuid(sel: u32, guest_state: &mut GuestState) {

@@ -55,7 +55,6 @@ impl InterruptController {
 /// A virtual timer to issue virtual time IRQ.
 #[derive(Debug, Default)]
 pub struct VirtualTimer {
-    last_tick: usize,
     current: usize,
     count: usize,
     enabled: bool,
@@ -69,7 +68,6 @@ impl VirtualTimer {
     pub fn set_enable(&mut self, enable: bool) {
         self.current = 0;
         self.enabled = enable;
-        self.last_tick = unsafe { crate::trap::TICK };
     }
 
     pub fn set_count(&mut self, count: usize) {
@@ -79,10 +77,7 @@ impl VirtualTimer {
     }
 
     pub fn tick(&mut self) -> bool {
-        let tick = unsafe { crate::trap::TICK };
-        let elapsed = tick - self.last_tick;
-        self.last_tick = tick;
-        self.current += elapsed;
+        self.current += 1;
         if self.current >= self.count {
             self.current -= self.count;
             true

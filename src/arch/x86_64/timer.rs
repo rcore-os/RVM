@@ -1,7 +1,7 @@
 //! x86 virtual timer
 
-use crate::arch::interrupt::consts::*;
-use crate::rvm::interrupt::VirtualTimer;
+use super::consts::*;
+use crate::interrupt::VirtualTimer;
 
 #[derive(Debug)]
 enum PitTimerRwState {
@@ -60,7 +60,7 @@ impl PitTimer {
                 self.count |= (value as usize) << 8;
                 self.write_state = Lsb;
                 self.inner
-                    .set_count(self.count_to_us() / crate::consts::USEC_PER_TICK);
+                    .set_count(self.count_to_us() / super::consts::USEC_PER_TICK);
                 self.inner.set_enable(true);
             }
         }

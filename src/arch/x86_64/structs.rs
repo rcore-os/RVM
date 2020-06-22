@@ -1,17 +1,16 @@
 //! Some global structs used for VMX.
 
 use alloc::vec::Vec;
+use lazy_static::lazy_static;
 use spin::Mutex;
 use x86_64::registers::control::{Cr0, Cr4, Cr4Flags};
 use x86_64::{instructions::vmx, PhysAddr};
 
-use rcore_memory::PAGE_SIZE;
-
+use super::consts::PAGE_SIZE;
+use super::feature::x86_feature_init;
 use super::msr::*;
 use crate::memory::{alloc_frame, dealloc_frame, phys_to_virt};
-use crate::rvm::{RvmError, RvmResult};
-
-use super::feature::x86_feature_init;
+use crate::{RvmError, RvmResult};
 
 /// A physical frame (or virtual page) of size PAGE_SIZE used as VMXON region,
 /// VMCS region, or MSR page, etc.
@@ -53,7 +52,7 @@ impl VmxPage {
 
 impl Drop for VmxPage {
     fn drop(&mut self) {
-        println!("VmxPage free {:#x?}", self);
+        info!("VmxPage free {:#x?}", self);
         dealloc_frame(self.paddr);
     }
 }
@@ -230,10 +229,7 @@ impl VmmState {
         unsafe {
             // Execute VMXOFF.
             if vmx::vmxoff().is_none() {
-                warn!(
-                    "[RVM] failed to turn off VMX on CPU {}",
-                    crate::arch::cpu::id()
-                );
+                warn!("[RVM] failed to turn off VMX");
                 return;
             }
             // Disable VMX.

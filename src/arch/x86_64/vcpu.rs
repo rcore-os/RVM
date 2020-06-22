@@ -1,13 +1,5 @@
 //! The virtual CPU within a guest.
 
-use alloc::{boxed::Box, sync::Arc};
-use core::sync::atomic::{AtomicBool, Ordering};
-use x86_64::{
-    instructions::vmx,
-    registers::control::{Cr0, Cr0Flags, Cr3, Cr4, Cr4Flags},
-    registers::model_specific::{Efer, EferFlags},
-};
-
 use super::{
     msr::*,
     structs::{MsrList, VmxPage},
@@ -16,8 +8,16 @@ use super::{
     vmexit::vmexit_handler,
     Guest,
 };
-use crate::rvm::interrupt::InterruptController;
-use crate::rvm::{inode::RvmGuestState, packet::RvmExitPacket, RvmError, RvmResult};
+use crate::interrupt::InterruptController;
+use crate::{packet::RvmExitPacket, RvmError, RvmResult};
+use alloc::{boxed::Box, sync::Arc};
+use core::sync::atomic::{AtomicBool, Ordering};
+use memoffset::offset_of;
+use x86_64::{
+    instructions::vmx,
+    registers::control::{Cr0, Cr0Flags, Cr3, Cr4, Cr4Flags},
+    registers::model_specific::{Efer, EferFlags},
+};
 
 /// Holds the register state used to restore a host.
 #[repr(C)]
@@ -126,7 +126,7 @@ impl InterruptState {
 
     /// Injects an interrupt into the guest, if there is one pending.
     fn try_inject_interrupt(&mut self, vmcs: &mut AutoVmcs) -> RvmResult<()> {
-        use crate::arch::interrupt::consts::*;
+        use super::consts::*;
         // Since hardware generated exceptions are delivered to the guest directly, the only exceptions
         // we see here are those we generate in the VMM, e.g. GP faults in vmexit handlers. Therefore
         // we simplify interrupt priority to 1) NMIs, 2) interrupts, and 3) generated exceptions. See
@@ -182,7 +182,7 @@ impl InterruptState {
 #[derive(Debug)]
 pub struct Vcpu {
     vpid: u16,
-    guest: Arc<Box<Guest>>,
+    guest: Arc<Guest>,
     running: AtomicBool,
     vmx_state: VmxState,
     vmcs_page: VmxPage,
@@ -192,7 +192,7 @@ pub struct Vcpu {
 }
 
 impl Vcpu {
-    pub fn new(vpid: u16, guest: Arc<Box<Guest>>) -> RvmResult<Box<Self>> {
+    pub fn new(vpid: u16, guest: Arc<Guest>) -> RvmResult<Box<Self>> {
         // TODO pin thread
 
         let vmx_basic = VmxBasic::read();
@@ -246,8 +246,6 @@ impl Vcpu {
 
     /// Setup VMCS host state.
     unsafe fn init_vmcs_host(&self, vmcs: &mut AutoVmcs) -> RvmResult<()> {
-        use crate::arch::{gdt, idt};
-
         vmcs.write64(VmcsField64::HOST_IA32_PAT, Msr::new(MSR_IA32_PAT).read());
         vmcs.write64(VmcsField64::HOST_IA32_EFER, Msr::new(MSR_IA32_EFER).read());
 
@@ -260,12 +258,18 @@ impl Vcpu {
         vmcs.writeXX(VmcsFieldXX::HOST_CR4, Cr4::read_raw() as usize);
 
         vmcs.write16(VmcsField16::HOST_ES_SELECTOR, 0);
-        vmcs.write16(VmcsField16::HOST_CS_SELECTOR, gdt::KCODE_SELECTOR.0);
-        vmcs.write16(VmcsField16::HOST_SS_SELECTOR, gdt::KDATA_SELECTOR.0);
+        vmcs.write16(
+            VmcsField16::HOST_CS_SELECTOR,
+            x86::segmentation::cs().bits(),
+        );
+        vmcs.write16(
+            VmcsField16::HOST_SS_SELECTOR,
+            x86::segmentation::ss().bits(),
+        );
         vmcs.write16(VmcsField16::HOST_DS_SELECTOR, 0);
         vmcs.write16(VmcsField16::HOST_FS_SELECTOR, 0);
         vmcs.write16(VmcsField16::HOST_GS_SELECTOR, 0);
-        vmcs.write16(VmcsField16::HOST_TR_SELECTOR, gdt::TSS_SELECTOR.0);
+        vmcs.write16(VmcsField16::HOST_TR_SELECTOR, x86::task::tr().bits());
 
         vmcs.writeXX(
             VmcsFieldXX::HOST_FS_BASE,
@@ -275,9 +279,12 @@ impl Vcpu {
             VmcsFieldXX::HOST_GS_BASE,
             Msr::new(MSR_IA32_GS_BASE).read() as usize,
         );
-        vmcs.writeXX(VmcsFieldXX::HOST_TR_BASE, gdt::Cpu::current().tss_base());
-        vmcs.writeXX(VmcsFieldXX::HOST_GDTR_BASE, gdt::sgdt().base as usize);
-        vmcs.writeXX(VmcsFieldXX::HOST_IDTR_BASE, idt::sidt().base as usize);
+        let mut dtp = x86::dtables::DescriptorTablePointer::new(&0);
+        vmcs.writeXX(VmcsFieldXX::HOST_TR_BASE, todo!());
+        x86::dtables::sgdt(&mut dtp);
+        vmcs.writeXX(VmcsFieldXX::HOST_GDTR_BASE, dtp.base as usize);
+        x86::dtables::sidt(&mut dtp);
+        vmcs.writeXX(VmcsFieldXX::HOST_IDTR_BASE, dtp.base as usize);
 
         vmcs.writeXX(VmcsFieldXX::HOST_IA32_SYSENTER_ESP, 0);
         vmcs.writeXX(VmcsFieldXX::HOST_IA32_SYSENTER_EIP, 0);
@@ -595,45 +602,16 @@ impl Vcpu {
         }
     }
 
-    pub fn write_state(&mut self, guest_state: RvmGuestState) -> RvmResult<()> {
-        self.vmx_state.guest_state.rax = guest_state.rax;
-        self.vmx_state.guest_state.rcx = guest_state.rcx;
-        self.vmx_state.guest_state.rdx = guest_state.rdx;
-        self.vmx_state.guest_state.rbx = guest_state.rbx;
-        self.vmx_state.guest_state.rbp = guest_state.rbp;
-        self.vmx_state.guest_state.rsi = guest_state.rsi;
-        self.vmx_state.guest_state.rdi = guest_state.rdi;
-        self.vmx_state.guest_state.r8 = guest_state.r8;
-        self.vmx_state.guest_state.r9 = guest_state.r9;
-        self.vmx_state.guest_state.r10 = guest_state.r10;
-        self.vmx_state.guest_state.r11 = guest_state.r11;
-        self.vmx_state.guest_state.r12 = guest_state.r12;
-        self.vmx_state.guest_state.r13 = guest_state.r13;
-        self.vmx_state.guest_state.r14 = guest_state.r14;
-        self.vmx_state.guest_state.r15 = guest_state.r15;
+    pub fn write_state(&mut self, guest_state: &GuestState) -> RvmResult<()> {
+        self.vmx_state.guest_state = guest_state;
         Ok(())
     }
 
-    pub fn read_state(&self) -> RvmResult<RvmGuestState> {
-        Ok(RvmGuestState {
-            rax: self.vmx_state.guest_state.rax,
-            rcx: self.vmx_state.guest_state.rcx,
-            rdx: self.vmx_state.guest_state.rdx,
-            rbx: self.vmx_state.guest_state.rbx,
-            rbp: self.vmx_state.guest_state.rbp,
-            rsi: self.vmx_state.guest_state.rsi,
-            rdi: self.vmx_state.guest_state.rdi,
-            r8: self.vmx_state.guest_state.r8,
-            r9: self.vmx_state.guest_state.r9,
-            r10: self.vmx_state.guest_state.r10,
-            r11: self.vmx_state.guest_state.r11,
-            r12: self.vmx_state.guest_state.r12,
-            r13: self.vmx_state.guest_state.r13,
-            r14: self.vmx_state.guest_state.r14,
-            r15: self.vmx_state.guest_state.r15,
-        })
+    pub fn read_state(&self) -> RvmResult<GuestState> {
+        Ok(self.vmx_state.guest_state.clone())
     }
 
+    /// Inject a virtual interrupt.
     pub fn virtual_interrupt(&mut self, vector: u32) -> RvmResult<()> {
         self.interrupt_state
             .controller
@@ -644,7 +622,7 @@ impl Vcpu {
 
 impl Drop for Vcpu {
     fn drop(&mut self) {
-        println!("Vcpu free {:#x?}", self);
+        info!("Vcpu free {:#x?}", self);
         // TODO pin thread
         unsafe { vmx::vmclear(self.vmcs_page.phys_addr()) };
     }

@@ -1,18 +1,16 @@
 //! The guest within the hypervisor.
 
-use alloc::boxed::Box;
 use alloc::sync::Arc;
 use spin::RwLock;
 
-use rcore_memory::{memory_set::MemoryAttr, PAGE_SIZE};
-
+use super::consts::PAGE_SIZE;
 use super::guest_phys_memory_set::{
     GuestPhysAddr, GuestPhysicalMemorySet, HostVirtAddr, RvmPageTableHandlerDelay,
 };
 use super::structs::VMM_STATE;
 use crate::memory::GlobalFrameAlloc;
-use crate::rvm::trap_map::{TrapKind, TrapMap};
-use crate::rvm::{RvmError, RvmResult};
+use crate::trap_map::{TrapKind, TrapMap};
+use crate::{RvmError, RvmResult};
 
 /// Represents a guest within the hypervisor.
 #[derive(Debug)]
@@ -22,9 +20,9 @@ pub struct Guest {
 }
 
 impl Guest {
-    pub fn new() -> RvmResult<Box<Self>> {
+    pub fn new() -> RvmResult<Arc<Self>> {
         VMM_STATE.lock().alloc()?;
-        Ok(Box::new(Self {
+        Ok(Arc::new(Self {
             gpm: Arc::new(RwLock::new(GuestPhysicalMemorySet::new())),
             traps: RwLock::new(TrapMap::new()),
         }))
@@ -78,7 +76,7 @@ impl Guest {
 
 impl Drop for Guest {
     fn drop(&mut self) {
-        println!("Guest free {:#x?}", self);
+        info!("Guest free {:#x?}", self);
         VMM_STATE.lock().free();
     }
 }

@@ -1,5 +1,6 @@
 use raw_cpuid::CpuId;
 
+mod consts;
 mod epage_table;
 mod exit_reason;
 mod feature;
