@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use spin::Mutex;
-use x86::bits64::vmx;
+use x86::{bits64::vmx, msr};
 use x86_64::registers::control::{Cr0, Cr4, Cr4Flags};
 
 use super::consts::PAGE_SIZE;
@@ -200,11 +200,19 @@ impl VmmState {
 
         // Check control registers are in a VMX-friendly state.
         let cr0 = Cr0::read();
-        if !cr_is_valid(cr0.bits(), MSR_IA32_VMX_CR0_FIXED0, MSR_IA32_VMX_CR0_FIXED1) {
+        if !cr_is_valid(
+            cr0.bits(),
+            msr::IA32_VMX_CR0_FIXED0,
+            msr::IA32_VMX_CR0_FIXED1,
+        ) {
             return Err(RvmError::DeviceError);
         }
         let cr4 = Cr4::read() | Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS;
-        if !cr_is_valid(cr4.bits(), MSR_IA32_VMX_CR4_FIXED0, MSR_IA32_VMX_CR4_FIXED1) {
+        if !cr_is_valid(
+            cr4.bits(),
+            msr::IA32_VMX_CR4_FIXED0,
+            msr::IA32_VMX_CR4_FIXED1,
+        ) {
             return Err(RvmError::DeviceError);
         }
 

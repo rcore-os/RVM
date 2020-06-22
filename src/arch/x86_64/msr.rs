@@ -9,87 +9,6 @@ use bitflags::bitflags;
 
 pub use x86_64::registers::model_specific::Msr;
 
-/// Control Features in Intel 64 Processor.
-pub const MSR_IA32_FEATURE_CONTROL: u32 = 0x003a;
-
-/// Per Logical Processor TSC Adjust (R/Write to clear)
-pub const MSR_IA32_TSC_ADJUST: u32 = 0x003b;
-
-/// IA32_PAT (R/W)
-pub const MSR_IA32_PAT: u32 = 0x0277;
-
-/// Basic VMX information.
-pub const MSR_IA32_VMX_BASIC: u32 = 0x0480;
-
-/// Pin-Based VM-Execution Controls.
-pub const MSR_IA32_VMX_PINBASED_CTLS: u32 = 0x0481;
-
-/// Primary Processor-Based VM-Execution Controls.
-pub const MSR_IA32_VMX_PROCBASED_CTLS: u32 = 0x0482;
-
-/// VM-Exit Controls.
-pub const MSR_IA32_VMX_EXIT_CTLS: u32 = 0x0483;
-
-/// VM-Entry Controls.
-pub const MSR_IA32_VMX_ENTRY_CTLS: u32 = 0x0484;
-
-/// Miscellaneous info.
-pub const MSR_IA32_VMX_MISC: u32 = 0x0485;
-
-/// CR0 bits that must be 0 to enter VMX.
-pub const MSR_IA32_VMX_CR0_FIXED0: u32 = 0x0486;
-
-/// CR0 bits that must be 1 to enter VMX
-pub const MSR_IA32_VMX_CR0_FIXED1: u32 = 0x0487;
-
-/// CR4 bits that must be 0 to enter VMX.
-pub const MSR_IA32_VMX_CR4_FIXED0: u32 = 0x0488;
-
-/// CR4 bits that must be 1 to enter VMX.
-pub const MSR_IA32_VMX_CR4_FIXED1: u32 = 0x0489;
-
-/// Secondary Processor-Based VM-Execution Controls.
-pub const MSR_IA32_VMX_PROCBASED_CTLS2: u32 = 0x048b;
-
-/// VPID and EPT Capabilities.
-pub const MSR_IA32_VMX_EPT_VPID_CAP: u32 = 0x048c;
-
-/// Pin-Based VM-Execution Flex Controls.
-pub const MSR_IA32_VMX_TRUE_PINBASED_CTLS: u32 = 0x048d;
-
-/// Primary Processor-Based VM-Execution Flex Controls.
-pub const MSR_IA32_VMX_TRUE_PROCBASED_CTLS: u32 = 0x048e;
-
-/// VM-Exit Flex Controls.
-pub const MSR_IA32_VMX_TRUE_EXIT_CTLS: u32 = 0x048f;
-
-/// VM-Entry Flex Controls.
-pub const MSR_IA32_VMX_TRUE_ENTRY_CTLS: u32 = 0x0490;
-
-/// Extended Feature Enables
-pub const MSR_IA32_EFER: u32 = 0xc000_0080;
-
-/// System Call Target Address (R/W)
-pub const MSR_IA32_STAR: u32 = 0xc000_0081;
-
-/// IA-32e Mode System Call Target Address (R/W)
-pub const MSR_IA32_LSTAR: u32 = 0xc000_0082;
-
-/// System Call Flag Mask (R/W)
-pub const MSR_IA32_FMASK: u32 = 0xc000_0084;
-
-/// Map of BASE Address of FS (R/W)
-pub const MSR_IA32_FS_BASE: u32 = 0xc000_0100;
-
-/// Map of BASE Address of GS (R/W)
-pub const MSR_IA32_GS_BASE: u32 = 0xc000_0101;
-
-/// Swap Target of BASE Address of GS (R/W)
-pub const MSR_IA32_KERNEL_GS_BASE: u32 = 0xc000_0102;
-
-/// AUXILIARY TSC Signature (R/W)
-pub const MSR_IA32_TSC_AUX: u32 = 0xc000_0103;
-
 trait MsrReadWrite {
     const MSR: Msr;
 
@@ -135,7 +54,7 @@ pub struct VmxBasic {
 }
 
 impl MsrReadWrite for VmxBasic {
-    const MSR: Msr = Msr::new(MSR_IA32_VMX_BASIC);
+    const MSR: Msr = Msr::new(x86::msr::IA32_VMX_BASIC);
 }
 
 impl VmxBasic {
@@ -172,7 +91,7 @@ bitflags! {
 pub struct FeatureControl;
 
 impl MsrReadWrite for FeatureControl {
-    const MSR: Msr = Msr::new(MSR_IA32_FEATURE_CONTROL);
+    const MSR: Msr = Msr::new(x86::msr::IA32_FEATURE_CONTROL);
 }
 
 impl FeatureControl {

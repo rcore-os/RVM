@@ -12,7 +12,7 @@ use crate::interrupt::InterruptController;
 use crate::{packet::RvmExitPacket, RvmError, RvmResult};
 use alloc::{boxed::Box, sync::Arc};
 use core::sync::atomic::{AtomicBool, Ordering};
-use x86::bits64::vmx;
+use x86::{bits64::vmx, msr};
 use x86_64::{
     registers::control::{Cr0, Cr0Flags, Cr3, Cr4, Cr4Flags},
     registers::model_specific::{Efer, EferFlags},
@@ -221,12 +221,12 @@ impl Vcpu {
     /// Setup MSRs to be stored and loaded on VM exits/entrie.
     unsafe fn setup_msr_list(&mut self) {
         let msr_list = [
-            MSR_IA32_KERNEL_GS_BASE,
-            MSR_IA32_STAR,
-            MSR_IA32_LSTAR,
-            MSR_IA32_FMASK,
-            MSR_IA32_TSC_ADJUST,
-            MSR_IA32_TSC_AUX,
+            msr::IA32_KERNEL_GSBASE,
+            msr::IA32_STAR,
+            msr::IA32_LSTAR,
+            msr::IA32_FMASK,
+            msr::IA32_TSC_ADJUST,
+            msr::IA32_TSC_AUX,
         ];
         let count = msr_list.len();
         self.host_msr_list.set_count(count);
@@ -239,8 +239,8 @@ impl Vcpu {
 
     /// Setup VMCS host state.
     unsafe fn init_vmcs_host(&self, vmcs: &mut AutoVmcs) -> RvmResult<()> {
-        vmcs.write64(VmcsField64::HOST_IA32_PAT, Msr::new(MSR_IA32_PAT).read());
-        vmcs.write64(VmcsField64::HOST_IA32_EFER, Msr::new(MSR_IA32_EFER).read());
+        vmcs.write64(VmcsField64::HOST_IA32_PAT, Msr::new(msr::IA32_PAT).read());
+        vmcs.write64(VmcsField64::HOST_IA32_EFER, Msr::new(msr::IA32_EFER).read());
 
         vmcs.writeXX(VmcsFieldXX::HOST_CR0, Cr0::read_raw() as usize);
         let cr3 = Cr3::read();
@@ -266,11 +266,11 @@ impl Vcpu {
 
         vmcs.writeXX(
             VmcsFieldXX::HOST_FS_BASE,
-            Msr::new(MSR_IA32_FS_BASE).read() as usize,
+            Msr::new(msr::IA32_FS_BASE).read() as usize,
         );
         vmcs.writeXX(
             VmcsFieldXX::HOST_GS_BASE,
-            Msr::new(MSR_IA32_GS_BASE).read() as usize,
+            Msr::new(msr::IA32_GS_BASE).read() as usize,
         );
         let mut dtp = x86::dtables::DescriptorTablePointer::new(&0);
         vmcs.writeXX(VmcsFieldXX::HOST_TR_BASE, todo!());
@@ -290,7 +290,7 @@ impl Vcpu {
 
     /// Setup VMCS guest state.
     unsafe fn init_vmcs_guest(&self, vmcs: &mut AutoVmcs, entry: u64) -> RvmResult<()> {
-        vmcs.write64(VmcsField64::GUEST_IA32_PAT, Msr::new(MSR_IA32_PAT).read());
+        vmcs.write64(VmcsField64::GUEST_IA32_PAT, Msr::new(msr::IA32_PAT).read());
         let mut efer = Efer::read();
         efer.remove(EferFlags::LONG_MODE_ENABLE | EferFlags::LONG_MODE_ACTIVE);
         vmcs.write64(VmcsField64::GUEST_IA32_EFER, efer.bits());
@@ -397,7 +397,7 @@ impl Vcpu {
         // Setup secondary processor-based VMCS controls.
         vmcs.set_control(
             VmcsField32::SECONDARY_VM_EXEC_CONTROL,
-            Msr::new(MSR_IA32_VMX_PROCBASED_CTLS2).read(),
+            Msr::new(msr::IA32_VMX_PROCBASED_CTLS2).read(),
             0,
             (CpuCtrl2::EPT
                 | CpuCtrl2::RDTSCP
@@ -410,7 +410,7 @@ impl Vcpu {
         // Enable use of INVPCID instruction if available.
         vmcs.set_control(
             VmcsField32::SECONDARY_VM_EXEC_CONTROL,
-            Msr::new(MSR_IA32_VMX_PROCBASED_CTLS2).read(),
+            Msr::new(msr::IA32_VMX_PROCBASED_CTLS2).read(),
             vmcs.read32(VmcsField32::SECONDARY_VM_EXEC_CONTROL) as u64,
             CpuCtrl2::INVPCID.bits(),
             0,
@@ -420,8 +420,8 @@ impl Vcpu {
         // Setup pin-based VMCS controls.
         vmcs.set_control(
             VmcsField32::PIN_BASED_VM_EXEC_CONTROL,
-            Msr::new(MSR_IA32_VMX_TRUE_PINBASED_CTLS).read(),
-            Msr::new(MSR_IA32_VMX_PINBASED_CTLS).read(),
+            Msr::new(msr::IA32_VMX_TRUE_PINBASED_CTLS).read(),
+            Msr::new(msr::IA32_VMX_PINBASED_CTLS).read(),
             (PinCtrl::INTR_EXITING | PinCtrl::NMI_EXITING).bits(),
             0,
         )?;
@@ -429,8 +429,8 @@ impl Vcpu {
         // Setup primary processor-based VMCS controls.
         vmcs.set_control(
             VmcsField32::CPU_BASED_VM_EXEC_CONTROL,
-            Msr::new(MSR_IA32_VMX_TRUE_PROCBASED_CTLS).read(),
-            Msr::new(MSR_IA32_VMX_PROCBASED_CTLS).read(),
+            Msr::new(msr::IA32_VMX_TRUE_PROCBASED_CTLS).read(),
+            Msr::new(msr::IA32_VMX_PROCBASED_CTLS).read(),
             // Enable XXX
             (CpuCtrl::INTR_WINDOW_EXITING
                 | CpuCtrl::HLT_EXITING
@@ -454,8 +454,8 @@ impl Vcpu {
         // Setup VM-exit VMCS controls.
         vmcs.set_control(
             VmcsField32::VM_EXIT_CONTROLS,
-            Msr::new(MSR_IA32_VMX_TRUE_EXIT_CTLS).read(),
-            Msr::new(MSR_IA32_VMX_EXIT_CTLS).read(),
+            Msr::new(msr::IA32_VMX_TRUE_EXIT_CTLS).read(),
+            Msr::new(msr::IA32_VMX_EXIT_CTLS).read(),
             (VmExitControls::HOST_ADDR_SPACE_SIZE
                 | VmExitControls::SAVE_IA32_PAT
                 | VmExitControls::LOAD_IA32_PAT
@@ -469,8 +469,8 @@ impl Vcpu {
         // Setup VM-entry VMCS controls.
         vmcs.set_control(
             VmcsField32::VM_ENTRY_CONTROLS,
-            Msr::new(MSR_IA32_VMX_TRUE_ENTRY_CTLS).read(),
-            Msr::new(MSR_IA32_VMX_ENTRY_CTLS).read(),
+            Msr::new(msr::IA32_VMX_TRUE_ENTRY_CTLS).read(),
+            Msr::new(msr::IA32_VMX_ENTRY_CTLS).read(),
             (VmEntryControls::LOAD_IA32_PAT | VmEntryControls::LOAD_IA32_EFER).bits(),
             0,
         )?;
@@ -569,7 +569,9 @@ impl Vcpu {
 
             // VM Entry
             self.running.store(true, Ordering::SeqCst);
+            trace!("[RVM] vmx entry");
             let res = unsafe { vmx_entry(&mut self.vmx_state) };
+            trace!("[RVM] vmx exit");
             self.running.store(false, Ordering::SeqCst);
 
             res.map_err(|err| {
