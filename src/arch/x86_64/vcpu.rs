@@ -12,7 +12,6 @@ use crate::interrupt::InterruptController;
 use crate::{packet::RvmExitPacket, RvmError, RvmResult};
 use alloc::{boxed::Box, sync::Arc};
 use core::sync::atomic::{AtomicBool, Ordering};
-use memoffset::offset_of;
 use x86_64::{
     instructions::vmx,
     registers::control::{Cr0, Cr0Flags, Cr3, Cr4, Cr4Flags},
@@ -23,29 +22,29 @@ use x86_64::{
 #[repr(C)]
 #[derive(Debug, Default)]
 struct HostState {
-    // Return address.
-    rip: u64,
-
+    // Extended control registers.
+    xcr0: u64,
     // Callee-save registers.
     rbx: u64,
-    rsp: u64,
     rbp: u64,
     r12: u64,
     r13: u64,
     r14: u64,
     r15: u64,
-
     // Processor flags.
     rflags: u64,
-
-    // Extended control registers.
-    xcr0: u64,
+    // Return address.
+    rip: u64,
 }
 
 /// Holds the register state used to restore a guest.
 #[repr(C)]
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GuestState {
+    // Extended control registers.
+    pub xcr0: u64,
+    // Control registers.
+    pub cr2: u64,
     //  RIP, RSP, and RFLAGS are automatically saved by VMX in the VMCS.
     pub rax: u64,
     pub rcx: u64,
@@ -62,12 +61,6 @@ pub struct GuestState {
     pub r13: u64,
     pub r14: u64,
     pub r15: u64,
-
-    // Control registers.
-    pub cr2: u64,
-
-    // Extended control registers.
-    pub xcr0: u64,
 }
 
 impl GuestState {
@@ -96,9 +89,9 @@ impl GuestState {
 #[repr(C)]
 #[derive(Debug, Default)]
 struct VmxState {
-    resume: bool,
-    host_state: HostState,
+    host_rsp: u64,
     guest_state: GuestState,
+    resume: bool,
 }
 
 /// Store the interruption state/virtual timer.
@@ -528,7 +521,7 @@ impl Vcpu {
         // treated as guest-physical addresses. Guest-physical addresses are
         // translated by traversing a set of EPT paging structures to produce
         // physical addresses that are used to access memory.
-        let eptp = self.guest.eptp() as u64;
+        let eptp = self.guest.extended_page_table_pointer() as u64;
         vmcs.write64(VmcsField64::EPT_POINTER, eptp);
 
         // From Volume 3, Section 28.3.3.4: Software can use an INVEPT with type all
@@ -593,7 +586,6 @@ impl Vcpu {
                 &mut vmcs,
                 &mut self.vmx_state.guest_state,
                 &mut self.interrupt_state,
-                &self.guest.gpm,
                 &self.guest.traps,
             )? {
                 Some(packet) => return Ok(packet), // forward to user mode handler
@@ -603,7 +595,7 @@ impl Vcpu {
     }
 
     pub fn write_state(&mut self, guest_state: &GuestState) -> RvmResult<()> {
-        self.vmx_state.guest_state = guest_state;
+        self.vmx_state.guest_state = guest_state.clone();
         Ok(())
     }
 
@@ -631,45 +623,42 @@ impl Drop for Vcpu {
 #[naked]
 #[inline(never)]
 unsafe fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> {
-    let host_off = offset_of!(VmxState, host_state);
-    let guest_off = offset_of!(VmxState, guest_state);
     asm!("
     // Store host callee save registers, return address, and processor flags.
-    pop     qword ptr [rdi + $0] // rip
-    mov     [rdi + $1], rbx
-    mov     [rdi + $2], rsp
-    mov     [rdi + $3], rbp
-    mov     [rdi + $4], r12
-    mov     [rdi + $5], r13
-    mov     [rdi + $6], r14
-    mov     [rdi + $7], r15
     pushf
-    pop     qword ptr [rdi + $8] // rflags
+    push    r15
+    push    r14
+    push    r13
+    push    r12
+    push    rbp
+    push    rbx
 
-    // We are going to trample RDI, so move it to RSP.
+    // Store RSP and switch to GuestState
+    mov     [rdi], rsp
     mov     rsp, rdi
 
     // Load the guest registers not covered by the VMCS.
-    mov     rax, [rsp + $9]
+    add     rsp, 8      // skip xcr0
+    pop     rax
     mov     cr2, rax
-    mov     rax, [rsp + $10]
-    mov     rcx, [rsp + $11]
-    mov     rdx, [rsp + $12]
-    mov     rbx, [rsp + $13]
-    mov     rbp, [rsp + $14]
-    mov     rsi, [rsp + $15]
-    mov     rdi, [rsp + $16]
-    mov     r8, [rsp + $17]
-    mov     r9, [rsp + $18]
-    mov     r10, [rsp + $19]
-    mov     r11, [rsp + $20]
-    mov     r12, [rsp + $21]
-    mov     r13, [rsp + $22]
-    mov     r14, [rsp + $23]
-    mov     r15, [rsp + $24]
+    pop     rax
+    pop     rcx
+    pop     rdx
+    pop     rbx
+    pop     rbp
+    pop     rsi
+    pop     rdi
+    pop     r8
+    pop     r9
+    pop     r10
+    pop     r11
+    pop     r12
+    pop     r13
+    pop     r14
+    pop     r15
 
     // Check if vmlaunch or vmresume is needed
-    cmp     byte ptr [rsp + $25], 0
+    cmp     byte ptr [rsp], 0
     jne     1f
     vmlaunch
     jmp     2f
@@ -677,47 +666,17 @@ unsafe fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> {
 2:
     // We will only be here if vmlaunch or vmresume failed.
     // Restore host callee, RSP and return address.
-    mov     rdi, rsp
-    mov     rbx, [rdi + $1]
-    mov     rsp, [rdi + $2]
-    mov     rbp, [rdi + $3]
-    mov     r12, [rdi + $4]
-    mov     r13, [rdi + $5]
-    mov     r14, [rdi + $6]
-    mov     r15, [rdi + $7]
-    push    qword ptr [rdi + $8] // rflags
+    mov     rsp, [rsp - 18*8]
+    pop     rbx
+    pop     rbp
+    pop     r12
+    pop     r13
+    pop     r14
+    pop     r15
     popf
-    push    qword ptr [rdi + $0] // rip
 "
     :
-    : "i" (host_off + offset_of!(HostState, rip)),
-      "i" (host_off + offset_of!(HostState, rbx)),
-      "i" (host_off + offset_of!(HostState, rsp)),
-      "i" (host_off + offset_of!(HostState, rbp)),
-      "i" (host_off + offset_of!(HostState, r12)),
-      "i" (host_off + offset_of!(HostState, r13)),
-      "i" (host_off + offset_of!(HostState, r14)),
-      "i" (host_off + offset_of!(HostState, r15)),
-      "i" (host_off + offset_of!(HostState, rflags)),
-
-      "i" (guest_off + offset_of!(GuestState, cr2)),
-      "i" (guest_off + offset_of!(GuestState, rax)),
-      "i" (guest_off + offset_of!(GuestState, rcx)),
-      "i" (guest_off + offset_of!(GuestState, rdx)),
-      "i" (guest_off + offset_of!(GuestState, rbx)),
-      "i" (guest_off + offset_of!(GuestState, rbp)),
-      "i" (guest_off + offset_of!(GuestState, rsi)),
-      "i" (guest_off + offset_of!(GuestState, rdi)),
-      "i" (guest_off + offset_of!(GuestState, r8)),
-      "i" (guest_off + offset_of!(GuestState, r9)),
-      "i" (guest_off + offset_of!(GuestState, r10)),
-      "i" (guest_off + offset_of!(GuestState, r11)),
-      "i" (guest_off + offset_of!(GuestState, r12)),
-      "i" (guest_off + offset_of!(GuestState, r13)),
-      "i" (guest_off + offset_of!(GuestState, r14)),
-      "i" (guest_off + offset_of!(GuestState, r15)),
-
-      "i" (offset_of!(VmxState, resume))
+    :
     : "cc", "memory",
       "rax", "rbx", "rcx", "rdx", "rdi", "rsi"
       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
@@ -733,71 +692,41 @@ unsafe fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> {
 #[naked]
 #[inline(never)]
 unsafe fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
-    let host_off = offset_of!(VmxState, host_state);
-    let guest_off = offset_of!(VmxState, guest_state);
     asm!("
     // Store the guest registers not covered by the VMCS. At this point,
     // vmx_state is in RSP.
-    mov     [rsp + $10], rax
-    mov     [rsp + $11], rcx
-    mov     [rsp + $12], rdx
-    mov     [rsp + $13], rbx
-    mov     [rsp + $14], rbp
-    mov     [rsp + $15], rsi
-    mov     [rsp + $16], rdi
-    mov     [rsp + $17], r8
-    mov     [rsp + $18], r9
-    mov     [rsp + $19], r10
-    mov     [rsp + $20], r11
-    mov     [rsp + $21], r12
-    mov     [rsp + $22], r13
-    mov     [rsp + $23], r14
-    mov     [rsp + $24], r15
+    push    r15
+    push    r14
+    push    r13
+    push    r12
+    push    r11
+    push    r10
+    push    r9
+    push    r8
+    push    rdi
+    push    rsi
+    push    rbp
+    push    rbx
+    push    rdx
+    push    rcx
+    push    rax
     mov     rax, cr2
-    mov     [rsp + $9], rax
+    push    rax
+    sub     rsp, 16      // skip xcr0
 
-    // Load vmx_state from RSP into RDI.
-    mov     rdi, rsp
+    pop     rsp
 
     // Load host callee save registers, return address, and processor flags.
-    mov     rbx, [rdi + $1]
-    mov     rsp, [rdi + $2]
-    mov     rbp, [rdi + $3]
-    mov     r12, [rdi + $4]
-    mov     r13, [rdi + $5]
-    mov     r14, [rdi + $6]
-    mov     r15, [rdi + $7]
-    push    qword ptr [rdi + $8] // rflags
+    pop     rbx
+    pop     rbp
+    pop     r12
+    pop     r13
+    pop     r14
+    pop     r15
     popf
-    push    qword ptr [rdi + $0] // rip
 "
     :
-    : "i" (host_off + offset_of!(HostState, rip)),
-      "i" (host_off + offset_of!(HostState, rbx)),
-      "i" (host_off + offset_of!(HostState, rsp)),
-      "i" (host_off + offset_of!(HostState, rbp)),
-      "i" (host_off + offset_of!(HostState, r12)),
-      "i" (host_off + offset_of!(HostState, r13)),
-      "i" (host_off + offset_of!(HostState, r14)),
-      "i" (host_off + offset_of!(HostState, r15)),
-      "i" (host_off + offset_of!(HostState, rflags)),
-
-      "i" (guest_off + offset_of!(GuestState, cr2)),
-      "i" (guest_off + offset_of!(GuestState, rax)),
-      "i" (guest_off + offset_of!(GuestState, rcx)),
-      "i" (guest_off + offset_of!(GuestState, rdx)),
-      "i" (guest_off + offset_of!(GuestState, rbx)),
-      "i" (guest_off + offset_of!(GuestState, rbp)),
-      "i" (guest_off + offset_of!(GuestState, rsi)),
-      "i" (guest_off + offset_of!(GuestState, rdi)),
-      "i" (guest_off + offset_of!(GuestState, r8)),
-      "i" (guest_off + offset_of!(GuestState, r9)),
-      "i" (guest_off + offset_of!(GuestState, r10)),
-      "i" (guest_off + offset_of!(GuestState, r11)),
-      "i" (guest_off + offset_of!(GuestState, r12)),
-      "i" (guest_off + offset_of!(GuestState, r13)),
-      "i" (guest_off + offset_of!(GuestState, r14)),
-      "i" (guest_off + offset_of!(GuestState, r15))
+    : 
     : "cc", "memory",
       "rax", "rbx", "rcx", "rdx", "rdi", "rsi"
       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"

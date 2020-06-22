@@ -4,53 +4,48 @@ use alloc::sync::Arc;
 use spin::RwLock;
 
 use super::consts::PAGE_SIZE;
-use super::guest_phys_memory_set::{
-    GuestPhysAddr, GuestPhysicalMemorySet, HostVirtAddr, RvmPageTableHandlerDelay,
-};
+use super::epage_table::EPageTable;
 use super::structs::VMM_STATE;
-use crate::memory::GlobalFrameAlloc;
+use crate::memory::*;
 use crate::trap_map::{TrapKind, TrapMap};
 use crate::{RvmError, RvmResult};
 
 /// Represents a guest within the hypervisor.
 #[derive(Debug)]
 pub struct Guest {
-    pub gpm: Arc<RwLock<GuestPhysicalMemorySet>>,
+    page_table: RwLock<EPageTable>,
     pub traps: RwLock<TrapMap>,
 }
 
 impl Guest {
+    /// Create a new Guest.
     pub fn new() -> RvmResult<Arc<Self>> {
         VMM_STATE.lock().alloc()?;
         Ok(Arc::new(Self {
-            gpm: Arc::new(RwLock::new(GuestPhysicalMemorySet::new())),
+            page_table: RwLock::new(EPageTable::new()),
             traps: RwLock::new(TrapMap::new()),
         }))
     }
 
-    pub fn eptp(&self) -> usize {
-        self.gpm.read().token()
+    /// Get extended page-table pointer.
+    pub fn extended_page_table_pointer(&self) -> usize {
+        self.page_table.read().pointer()
     }
 
     pub fn add_memory_region(
         &self,
-        start_paddr: GuestPhysAddr,
+        gpaddr: GuestPhysAddr,
+        hpaddr: HostPhysAddr,
         size: usize,
-    ) -> RvmResult<HostVirtAddr> {
-        self.gpm.write().push(start_paddr, size)?;
-
-        let mut vm = unsafe { crate::process::current_thread().vm.lock() };
-        let vaddr = vm.find_free_area(PAGE_SIZE, size);
-        let handler =
-            RvmPageTableHandlerDelay::new(start_paddr, vaddr, self.gpm.clone(), GlobalFrameAlloc);
-        vm.push(
-            vaddr,
-            vaddr + size,
-            MemoryAttr::default().user().writable(),
-            handler,
-            "rvm_guest_physical",
-        );
-        Ok(vaddr)
+    ) -> RvmResult {
+        assert_eq!(gpaddr % PAGE_SIZE, 0);
+        assert_eq!(hpaddr % PAGE_SIZE, 0);
+        assert_eq!(size % PAGE_SIZE, 0);
+        let mut pt = self.page_table.write();
+        for offset in (0..size).step_by(PAGE_SIZE) {
+            pt.map(gpaddr + offset, hpaddr + offset);
+        }
+        Ok(())
     }
 
     pub fn set_trap(&self, kind: TrapKind, addr: usize, size: usize, key: u64) -> RvmResult<()> {

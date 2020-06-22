@@ -11,7 +11,6 @@ log = "0.4"
 spin = "0.5"
 bitflags = "1.2"
 bit_field = "0.10"
-memoffset = "0.5"
 raw-cpuid = "8.1"
 x86 = "0.34"
 lazy_static = { version = "1.4", features = ["spin_no_std"] }

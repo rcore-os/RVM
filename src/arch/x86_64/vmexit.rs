@@ -1,12 +1,10 @@
 //! VM exit handler
 
-use alloc::sync::Arc;
 use bit_field::BitField;
 use spin::RwLock;
 
 use super::exit_reason::ExitReason;
 use super::feature::*;
-use super::guest_phys_memory_set::GuestPhysicalMemorySet;
 use super::vcpu::{GuestState, InterruptState};
 use super::vmcs::*;
 use crate::packet::*;
@@ -422,7 +420,6 @@ fn handle_mmio(
 fn handle_ept_violation(
     exit_info: &ExitInfo,
     vmcs: &mut AutoVmcs,
-    gpm: &Arc<RwLock<GuestPhysicalMemorySet>>,
     traps: &RwLock<TrapMap>,
 ) -> ExitResult {
     let guest_paddr = vmcs.read64(VmcsField64::GUEST_PHYSICAL_ADDRESS) as usize;
@@ -437,15 +434,7 @@ fn handle_ept_violation(
         None => {}
     }
 
-    if !gpm.write().handle_page_fault(guest_paddr) {
-        warn!(
-            "[RVM] VM exit: Unhandled EPT violation @ {:#x}",
-            guest_paddr
-        );
-        Err(RvmError::NoDeviceSpace)
-    } else {
-        Ok(None)
-    }
+    Err(RvmError::NoDeviceSpace)
 }
 
 /// The common handler of VM exits.
@@ -459,7 +448,6 @@ pub fn vmexit_handler(
     vmcs: &mut AutoVmcs,
     guest_state: &mut GuestState,
     interrupt_state: &mut InterruptState,
-    gpm: &Arc<RwLock<GuestPhysicalMemorySet>>,
     traps: &RwLock<TrapMap>,
 ) -> ExitResult {
     let exit_info = ExitInfo::from(vmcs);
@@ -473,20 +461,16 @@ pub fn vmexit_handler(
         ExitReason::IO_INSTRUCTION => {
             handle_io_instruction(&exit_info, vmcs, guest_state, interrupt_state, traps)
         }
-        ExitReason::EPT_VIOLATION => handle_ept_violation(&exit_info, vmcs, gpm, traps),
+        ExitReason::EPT_VIOLATION => handle_ept_violation(&exit_info, vmcs, traps),
         _ => Err(RvmError::NotSupported),
     };
 
     if res.is_err() {
         warn!(
-            "[RVM] VM exit handler for reason {:?} returned {:?}\n{}\nInstruction: {:x?}",
+            "[RVM] VM exit handler for reason {:?} returned {:?}\n{}",
             exit_info.exit_reason,
             res,
             guest_state.dump(&vmcs),
-            gpm.write().fetch_data(
-                vmcs.readXX(VmcsFieldXX::GUEST_CS_BASE) + exit_info.guest_rip,
-                exit_info.exit_instruction_length as usize
-            ),
         );
     }
     res

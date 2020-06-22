@@ -2,6 +2,7 @@
 
 #![no_std]
 #![feature(asm)]
+#![feature(linkage)]
 #![feature(naked_functions)]
 #![feature(untagged_unions)]
 
@@ -14,6 +15,7 @@ extern crate log;
 #[path = "arch/x86_64/mod.rs"]
 mod arch;
 mod interrupt;
+mod memory;
 mod packet;
 mod trap_map;
 
@@ -22,8 +24,10 @@ pub use arch::Vcpu;
 
 pub type RvmResult<T = ()> = Result<T, RvmError>;
 
+#[derive(Debug)]
 pub enum RvmError {
     NotSupported,
     NoDeviceSpace,
     InvalidParam,
+    DeviceError,
 }

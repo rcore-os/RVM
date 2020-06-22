@@ -5,7 +5,6 @@ mod epage_table;
 mod exit_reason;
 mod feature;
 mod guest;
-mod guest_phys_memory_set;
 mod msr;
 mod structs;
 mod timer;

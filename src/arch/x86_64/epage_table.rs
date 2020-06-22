@@ -3,38 +3,31 @@
 
 #![allow(dead_code)]
 
-use rcore_memory::memory_set::handler::FrameAllocator;
-use x86_64::structures::paging::{FrameAllocator, Size4KiB};
-
 use super::consts::PAGE_SIZE;
-use super::guest_phys_memory_set::{GuestPhysAddr, HostPhysAddr};
-use crate::memory::phys_to_virt;
+use crate::memory::*;
 
 const MASK_PAGE_ALIGNED: usize = PAGE_SIZE - 1;
 
 /// Extended page table
 #[derive(Debug)]
-pub struct EPageTable<T: FrameAllocator<Size4KiB>> {
-    allocator: T,
+pub struct EPageTable {
     ept_page_root: HostPhysAddr,
 }
 
-impl<T: FrameAllocator<Size4KiB>> EPageTable<T> {
-    /// Create a new EPageTable
+impl EPageTable {
+    /// Create a new EPageTable.
     ///
     /// # Arguments
     ///     * allocator: FrameAllocator<Size4KiB>
-    pub fn new(allocator: T) -> Self {
-        let mut epage_table = Self {
-            allocator,
-            ept_page_root: 0,
-        };
+    pub fn new() -> Self {
+        let mut epage_table = Self { ept_page_root: 0 };
         epage_table.build();
         epage_table
     }
-    /// return EPT value (i.e. the physical address of root extended page table)
-    pub fn eptp(&self) -> usize {
-        let mut eptp = EPTP::new();
+
+    /// Return EPT value (i.e. the physical address of root extended page table)
+    pub fn pointer(&self) -> usize {
+        let mut eptp = EPageTablePointer::new();
         eptp.set_dirty_and_access_enabled(true);
         eptp.set_memory_type(6);
         eptp.set_page_walk_length(3);
@@ -42,26 +35,27 @@ impl<T: FrameAllocator<Size4KiB>> EPageTable<T> {
         return eptp.value();
     }
 
-    pub fn map(&mut self, guest_paddr: GuestPhysAddr, target: HostPhysAddr) -> EPageEntry {
+    /// Map a guest physical page to host physical page.
+    pub fn map(&mut self, guest_paddr: GuestPhysAddr, host_paddr: HostPhysAddr) -> EPageEntry {
         let mut entry = self.get_entry(guest_paddr);
         assert!(!entry.is_present());
-        entry.set_physical_address(target);
+        entry.set_physical_address(host_paddr);
         entry.set_present(true);
         entry.set_ept_memory_type(6);
         entry
     }
 
     /// return page entry, will create page table if need
-    pub fn get_entry(&self, guest_pa: GuestPhysAddr) -> EPageEntry {
+    pub fn get_entry(&self, guest_paddr: GuestPhysAddr) -> EPageEntry {
         let mut page_table = self.ept_page_root;
         for level in 0..4 {
-            let index = (guest_pa >> (12 + (3 - level) * 9)) & 0o777;
+            let index = (guest_paddr >> (12 + (3 - level) * 9)) & 0o777;
             let mut entry = EPageEntry::new(page_table + index * 8);
             if level == 3 {
                 return entry;
             }
             if !entry.is_present() {
-                let new_page = self.allocator.alloc().expect("failed to alloc frame");
+                let new_page = alloc_frame().expect("failed to alloc frame");
                 // clear all entry
                 for idx in 0..512 {
                     EPageEntry::new(new_page + idx * 8).zero();
@@ -73,12 +67,10 @@ impl<T: FrameAllocator<Size4KiB>> EPageTable<T> {
         }
         unreachable!();
     }
+
     fn build(&mut self) {
         assert_eq!(self.ept_page_root, 0);
-        self.ept_page_root = self
-            .allocator
-            .alloc()
-            .expect("failed to allocate ept_page_root frame");
+        self.ept_page_root = alloc_frame().expect("failed to allocate ept_page_root frame");
         // clear all entry
         for idx in 0..512 {
             EPageEntry::new(self.ept_page_root + idx * 8).zero();
@@ -95,13 +87,13 @@ impl<T: FrameAllocator<Size4KiB>> EPageTable<T> {
             let entry = EPageEntry::new(page + idx * 8);
             if entry.is_present() {
                 if level == 3 {
-                    self.allocator.dealloc(entry.get_physical_address());
+                    dealloc_frame(entry.get_physical_address());
                 } else {
                     self.unbuild_dfs(entry.get_physical_address(), level + 1);
                 }
             }
         }
-        self.allocator.dealloc(page);
+        dealloc_frame(page);
     }
     fn unbuild(&mut self) {
         self.unbuild_dfs(self.ept_page_root, 0);
@@ -110,7 +102,7 @@ impl<T: FrameAllocator<Size4KiB>> EPageTable<T> {
     }
 }
 
-impl<T: FrameAllocator<Size4KiB>> Drop for EPageTable<T> {
+impl Drop for EPageTable {
     fn drop(&mut self) {
         self.unbuild();
     }
@@ -247,11 +239,11 @@ struct {
     UINT64 Reserved2 : 16;
 }Fields;
 */
-struct EPTP {
+struct EPageTablePointer {
     value: usize,
 }
 
-impl EPTP {
+impl EPageTablePointer {
     fn new() -> Self {
         Self { value: 0 }
     }
