@@ -1,7 +1,7 @@
 //! Rcore Virtual Machine
 
 #![no_std]
-#![feature(asm)]
+#![feature(llvm_asm)]
 #![feature(linkage)]
 #![feature(naked_functions)]
 #![feature(untagged_unions)]

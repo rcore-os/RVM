@@ -1,12 +1,12 @@
 //! Virtual Machine Control Structures.
 
 use bitflags::bitflags;
-use x86_64::{instructions::vmx, PhysAddr};
+use x86::bits64::vmx;
 
 use crate::{RvmError, RvmResult};
 
 /// 16-Bit VMCS Fields.
-#[repr(usize)]
+#[repr(u32)]
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 #[allow(non_camel_case_types)]
@@ -33,7 +33,7 @@ pub enum VmcsField16 {
 }
 
 /// 64-Bit VMCS Fields.
-#[repr(usize)]
+#[repr(u32)]
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 #[allow(non_camel_case_types)]
@@ -117,7 +117,7 @@ pub enum VmcsField64 {
 }
 
 /// 32-Bit VMCS Fields.
-#[repr(usize)]
+#[repr(u32)]
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 #[allow(non_camel_case_types)]
@@ -174,7 +174,7 @@ pub enum VmcsField32 {
 }
 
 /// Natural-Width VMCS Fields.
-#[repr(usize)]
+#[repr(u32)]
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 #[allow(non_camel_case_types)]
@@ -532,13 +532,13 @@ pub struct AutoVmcs {
 }
 
 impl AutoVmcs {
-    pub fn new(phys_addr: PhysAddr) -> RvmResult<Self> {
+    pub fn new(phys_addr: u64) -> RvmResult<Self> {
         unsafe {
-            if vmx::vmptrld(phys_addr).is_none() {
+            if vmx::vmptrld(phys_addr).is_err() {
                 Err(RvmError::DeviceError)
             } else {
                 Ok(Self {
-                    vmcs_paddr: phys_addr.as_u64(),
+                    vmcs_paddr: phys_addr,
                 })
             }
         }
@@ -567,42 +567,37 @@ impl AutoVmcs {
     }
 
     pub fn read16(&self, field: VmcsField16) -> u16 {
-        self.read(field as usize) as u16
+        self.read(field as u32) as u16
     }
 
     pub fn read32(&self, field: VmcsField32) -> u32 {
-        self.read(field as usize) as u32
+        self.read(field as u32) as u32
     }
 
     pub fn read64(&self, field: VmcsField64) -> u64 {
-        #[cfg(target_pointer_width = "64")]
-        return self.read(field as usize) as u64;
-        #[cfg(target_pointer_width = "32")]
-        return self.read(field as usize) as u64 | (self.read(field as usize + 1) as u64) << 32;
+        self.read(field as u32) as u64
     }
 
     #[allow(non_snake_case)]
     pub fn readXX(&self, field: VmcsFieldXX) -> usize {
-        self.read(field as usize)
+        self.read(field as u32) as usize
     }
 
     pub fn write16(&mut self, field: VmcsField16, value: u16) {
-        self.write(field as usize, value as usize);
+        self.write(field as u32, value as u64);
     }
 
     pub fn write32(&mut self, field: VmcsField32, value: u32) {
-        self.write(field as usize, value as usize);
+        self.write(field as u32, value as u64);
     }
 
     pub fn write64(&mut self, field: VmcsField64, value: u64) {
-        self.write(field as usize, value as usize);
-        #[cfg(target_pointer_width = "32")]
-        self.write(field as usize + 1, (value >> 32) as usize);
+        self.write(field as u32, value as u64);
     }
 
     #[allow(non_snake_case)]
     pub fn writeXX(&mut self, field: VmcsFieldXX, value: usize) {
-        self.write(field as usize, value);
+        self.write(field as u32, value as u64);
     }
 
     pub fn set_control(
@@ -643,20 +638,20 @@ impl AutoVmcs {
     }
 
     #[inline]
-    fn read(&self, field: usize) -> usize {
+    fn read(&self, field: u32) -> u64 {
         debug_assert!(self.vmcs_paddr != 0);
         unsafe {
-            vmx::vmread(field).unwrap_or_else(|| {
+            vmx::vmread(field).unwrap_or_else(|_| {
                 panic!("[RVM] vmread error: field={:#x}", field);
             })
         }
     }
 
     #[inline]
-    fn write(&mut self, field: usize, value: usize) {
+    fn write(&mut self, field: u32, value: u64) {
         debug_assert!(self.vmcs_paddr != 0);
         unsafe {
-            if vmx::vmwrite(field, value).is_none() {
+            if vmx::vmwrite(field, value).is_err() {
                 warn!(
                     "[RVM] vmwrite error: field={:#x}, value={:#x}",
                     field, value

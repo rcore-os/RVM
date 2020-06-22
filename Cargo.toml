@@ -15,4 +15,4 @@ raw-cpuid = "8.1"
 x86 = "0.34"
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
 bit-set = { version = "0.5", default-features = false }
-x86_64 = { git = "https://github.com/equation314/x86_64", rev = "4ad4551" }
+x86_64 = "0.11"

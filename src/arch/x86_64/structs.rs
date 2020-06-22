@@ -3,8 +3,8 @@
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use spin::Mutex;
+use x86::bits64::vmx;
 use x86_64::registers::control::{Cr0, Cr4, Cr4Flags};
-use x86_64::{instructions::vmx, PhysAddr};
 
 use super::consts::PAGE_SIZE;
 use super::feature::x86_feature_init;
@@ -37,8 +37,8 @@ impl VmxPage {
         unsafe { *self.as_ptr::<u32>() = revision_id };
     }
 
-    pub fn phys_addr(&self) -> PhysAddr {
-        PhysAddr::new(self.paddr as u64)
+    pub fn phys_addr(&self) -> u64 {
+        self.paddr as u64
     }
 
     pub fn as_ptr<T>(&self) -> *mut T {
@@ -213,7 +213,7 @@ impl VmmState {
             Cr4::write(cr4);
 
             // Execute VMXON.
-            if vmx::vmxon(page.phys_addr()).is_none() {
+            if vmx::vmxon(page.phys_addr()).is_err() {
                 warn!("[RVM] failed to turn on VMX on CPU {}", cpu_num);
                 return Err(RvmError::DeviceError);
             }
@@ -228,7 +228,7 @@ impl VmmState {
     fn vmxoff_task(&self) {
         unsafe {
             // Execute VMXOFF.
-            if vmx::vmxoff().is_none() {
+            if vmx::vmxoff().is_err() {
                 warn!("[RVM] failed to turn off VMX");
                 return;
             }

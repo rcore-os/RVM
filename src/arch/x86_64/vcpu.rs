@@ -12,8 +12,8 @@ use crate::interrupt::InterruptController;
 use crate::{packet::RvmExitPacket, RvmError, RvmResult};
 use alloc::{boxed::Box, sync::Arc};
 use core::sync::atomic::{AtomicBool, Ordering};
+use x86::bits64::vmx;
 use x86_64::{
-    instructions::vmx,
     registers::control::{Cr0, Cr0Flags, Cr3, Cr4, Cr4Flags},
     registers::model_specific::{Efer, EferFlags},
 };
@@ -208,7 +208,7 @@ impl Vcpu {
 
     pub fn init(&mut self, entry: u64) -> RvmResult<()> {
         unsafe {
-            vmx::vmclear(self.vmcs_page.phys_addr()).ok_or(RvmError::DeviceError)?;
+            vmx::vmclear(self.vmcs_page.phys_addr()).map_err(|_| RvmError::DeviceError)?;
             let mut vmcs = AutoVmcs::new(self.vmcs_page.phys_addr())?;
             self.setup_msr_list();
             self.init_vmcs_host(&mut vmcs)?;
@@ -527,7 +527,7 @@ impl Vcpu {
         // From Volume 3, Section 28.3.3.4: Software can use an INVEPT with type all
         // ALL_CONTEXT to prevent undesired retention of cached EPT information. Here,
         // we only care about invalidating information associated with this EPTP.
-        vmx::invept(vmx::InvEptType::SingleContext, eptp);
+        invept(InvEptType::SingleContext, eptp);
 
         // Setup MSR handling.
         vmcs.write64(VmcsField64::MSR_BITMAP, 0); // TODO: msr_bitmap_addr
@@ -616,14 +616,14 @@ impl Drop for Vcpu {
     fn drop(&mut self) {
         info!("Vcpu free {:#x?}", self);
         // TODO pin thread
-        unsafe { vmx::vmclear(self.vmcs_page.phys_addr()) };
+        unsafe { vmx::vmclear(self.vmcs_page.phys_addr()).unwrap() };
     }
 }
 
 #[naked]
 #[inline(never)]
 unsafe fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> {
-    asm!("
+    llvm_asm!("
     // Store host callee save registers, return address, and processor flags.
     pushf
     push    r15
@@ -692,7 +692,7 @@ unsafe fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> {
 #[naked]
 #[inline(never)]
 unsafe fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
-    asm!("
+    llvm_asm!("
     // Store the guest registers not covered by the VMCS. At this point,
     // vmx_state is in RSP.
     push    r15
@@ -733,4 +733,36 @@ unsafe fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
     : "intel", "volatile");
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+pub struct InvEptDescriptor {
+    /// EPT pointer (EPTP)
+    eptp: u64,
+    reserved: u64,
+}
+
+#[derive(Debug)]
+#[repr(u64)]
+pub enum InvEptType {
+    /// The logical processor invalidates all mappings associated with bits
+    /// 51:12 of the EPT pointer (EPTP) specified in the INVEPT descriptor.
+    /// It may invalidate other mappings as well.
+    SingleContext = 1,
+
+    /// The logical processor invalidates mappings associated with all EPTPs.
+    Global = 2,
+}
+
+pub unsafe fn invept(invalidation: InvEptType, eptp: u64) -> Option<()> {
+    let err: bool;
+    let descriptor = InvEptDescriptor { eptp, reserved: 0 };
+    llvm_asm!("invept ($1), $2; setna $0" : "=r" (err) : "r" (&descriptor), "r" (invalidation) : "cc", "memory" : "volatile");
+
+    if err {
+        None
+    } else {
+        Some(())
+    }
 }
