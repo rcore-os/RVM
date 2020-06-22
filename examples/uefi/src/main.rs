@@ -19,7 +19,7 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
     info!("RVM example");
 
     let guest = Guest::new().unwrap();
-    let mut vcpu = Vcpu::new(0, guest.clone()).unwrap();
+    let mut vcpu = Vcpu::new(1, guest.clone()).unwrap();
 
     vcpu.write_state(&vcpu::GuestState {
         xcr0: 0,

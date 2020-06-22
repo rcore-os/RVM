@@ -16,7 +16,7 @@ use core::fmt::{Debug, Formatter, Result};
 use core::sync::atomic::{AtomicBool, Ordering};
 use x86::{bits64::vmx, msr};
 use x86_64::{
-    registers::control::{Cr0, Cr0Flags, Cr3, Cr4, Cr4Flags},
+    registers::control::{Cr0, Cr0Flags, Cr4, Cr4Flags},
     registers::model_specific::{Efer, EferFlags},
 };
 
@@ -188,14 +188,14 @@ pub struct Vcpu {
 impl Vcpu {
     pub fn new(vpid: u16, guest: Arc<Guest>) -> RvmResult<Box<Self>> {
         // TODO pin thread
-
+        assert_ne!(vpid, 0);
         let vmx_basic = VmxBasic::read();
         let host_msr_list = MsrList::new()?;
         let guest_msr_list = MsrList::new()?;
         let mut vmcs_page = VmxPage::alloc(0)?;
         vmcs_page.set_revision_id(vmx_basic.revision_id);
 
-        Ok(Box::new(Self {
+        let mut vcpu = Box::new(Self {
             vpid,
             guest,
             running: AtomicBool::new(false),
@@ -204,10 +204,12 @@ impl Vcpu {
             host_msr_list,
             guest_msr_list,
             interrupt_state: InterruptState::new(),
-        }))
+        });
+        vcpu.init(0)?;
+        Ok(vcpu)
     }
 
-    pub fn init(&mut self, entry: u64) -> RvmResult<()> {
+    pub fn init(&mut self, entry: u64) -> RvmResult {
         unsafe {
             vmx::vmclear(self.vmcs_page.phys_addr()).map_err(|_| RvmError::DeviceError)?;
             let mut vmcs = AutoVmcs::new(self.vmcs_page.phys_addr())?;
@@ -239,34 +241,30 @@ impl Vcpu {
     }
 
     /// Setup VMCS host state.
-    #[allow(unreachable_code, unused_variables, unused_mut)]
     unsafe fn init_vmcs_host(&self, vmcs: &mut AutoVmcs) -> RvmResult<()> {
         vmcs.write64(HOST_IA32_PAT, Msr::new(msr::IA32_PAT).read());
         vmcs.write64(HOST_IA32_EFER, Msr::new(msr::IA32_EFER).read());
 
         vmcs.writeXX(HOST_CR0, Cr0::read_raw() as usize);
-        let cr3 = Cr3::read();
-        vmcs.writeXX(
-            HOST_CR3,
-            (cr3.0.start_address().as_u64() | cr3.1.bits()) as usize,
-        );
+        vmcs.writeXX(HOST_CR3, x86::controlregs::cr3() as usize);
         vmcs.writeXX(HOST_CR4, Cr4::read_raw() as usize);
 
-        vmcs.write16(HOST_ES_SELECTOR, 0);
+        vmcs.write16(HOST_ES_SELECTOR, x86::segmentation::es().bits());
         vmcs.write16(HOST_CS_SELECTOR, x86::segmentation::cs().bits());
         vmcs.write16(HOST_SS_SELECTOR, x86::segmentation::ss().bits());
-        vmcs.write16(HOST_DS_SELECTOR, 0);
-        vmcs.write16(HOST_FS_SELECTOR, 0);
-        vmcs.write16(HOST_GS_SELECTOR, 0);
+        vmcs.write16(HOST_DS_SELECTOR, x86::segmentation::ds().bits());
+        vmcs.write16(HOST_FS_SELECTOR, x86::segmentation::fs().bits());
+        vmcs.write16(HOST_GS_SELECTOR, x86::segmentation::gs().bits());
         vmcs.write16(HOST_TR_SELECTOR, x86::task::tr().bits());
 
         vmcs.writeXX(HOST_FS_BASE, Msr::new(msr::IA32_FS_BASE).read() as usize);
         vmcs.writeXX(HOST_GS_BASE, Msr::new(msr::IA32_GS_BASE).read() as usize);
-        let mut dtp = x86::dtables::DescriptorTablePointer::new(&0);
-        vmcs.writeXX(HOST_TR_BASE, todo!());
-        x86::dtables::sgdt(&mut dtp);
+        let mut dtp = x86::dtables::DescriptorTablePointer::new(&0u64);
+        llvm_asm!("str ($0)" :: "r"(&mut dtp) :: "volatile");
+        vmcs.writeXX(HOST_TR_BASE, dtp.base as usize);
+        llvm_asm!("sgdt ($0)" :: "r"(&mut dtp) :: "volatile");
         vmcs.writeXX(HOST_GDTR_BASE, dtp.base as usize);
-        x86::dtables::sidt(&mut dtp);
+        llvm_asm!("sidt ($0)" :: "r"(&mut dtp) :: "volatile");
         vmcs.writeXX(HOST_IDTR_BASE, dtp.base as usize);
 
         vmcs.writeXX(HOST_IA32_SYSENTER_ESP, 0);
