@@ -6,7 +6,7 @@ use spin::RwLock;
 use super::exit_reason::ExitReason;
 use super::feature::*;
 use super::vcpu::{GuestState, InterruptState};
-use super::vmcs::*;
+use super::vmcs::{VmcsField16::*, VmcsField32::*, VmcsField64::*, VmcsFieldXX::*, *};
 use crate::packet::*;
 use crate::trap_map::{TrapKind, TrapMap};
 use crate::{RvmError, RvmResult};
@@ -40,19 +40,19 @@ struct ExitInfo {
 
 impl ExitInfo {
     fn from(vmcs: &AutoVmcs) -> Self {
-        let full_reason = vmcs.read32(VmcsField32::VM_EXIT_REASON);
+        let full_reason = vmcs.read32(VM_EXIT_REASON);
         Self {
             exit_reason: full_reason.get_bits(0..16).into(),
             entry_failure: full_reason.get_bit(31),
-            exit_instruction_length: vmcs.read32(VmcsField32::VM_EXIT_INSTRUCTION_LEN),
-            exit_qualification: vmcs.readXX(VmcsFieldXX::EXIT_QUALIFICATION),
-            guest_rip: vmcs.readXX(VmcsFieldXX::GUEST_RIP),
+            exit_instruction_length: vmcs.read32(VM_EXIT_INSTRUCTION_LEN),
+            exit_qualification: vmcs.readXX(EXIT_QUALIFICATION),
+            guest_rip: vmcs.readXX(GUEST_RIP),
         }
     }
 
     fn next_rip(&self, vmcs: &mut AutoVmcs) {
         vmcs.writeXX(
-            VmcsFieldXX::GUEST_RIP,
+            GUEST_RIP,
             self.guest_rip + self.exit_instruction_length as usize,
         )
     }
@@ -67,7 +67,7 @@ struct ExitInterruptionInfo {
 
 impl ExitInterruptionInfo {
     fn from(vmcs: &AutoVmcs) -> Self {
-        let info = vmcs.read32(VmcsField32::VM_EXIT_INTR_INFO);
+        let info = vmcs.read32(VM_EXIT_INTR_INFO);
         Self {
             vector: info.get_bits(0..8) as u8,
             interruption_type: info.get_bits(8..11) as u8,
@@ -163,8 +163,7 @@ fn handle_cpuid(
                 X86_CPUID_MODEL_FEATURES => {
                     // Override the initial local APIC ID. From Vol 2, Table 3-8.
                     guest_state.rbx &= !(0xff << 24);
-                    guest_state.rbx |=
-                        ((vmcs.read16(VmcsField16::VIRTUAL_PROCESSOR_ID) - 1) as u64) << 24;
+                    guest_state.rbx |= ((vmcs.read16(VIRTUAL_PROCESSOR_ID) - 1) as u64) << 24;
                     // Enable the hypervisor bit.
                     guest_state.rcx |= 1u64 << X86_FEATURE_HYPERVISOR.bit;
                     // Enable the x2APIC bit.
@@ -185,7 +184,7 @@ fn handle_cpuid(
                     guest_state.rdx &= !(1u64 << X86_FEATURE_ACPI.bit);
                 }
                 X86_CPUID_TOPOLOGY => {
-                    guest_state.rdx = (vmcs.read16(VmcsField16::VIRTUAL_PROCESSOR_ID) - 1) as u64;
+                    guest_state.rdx = (vmcs.read16(VIRTUAL_PROCESSOR_ID) - 1) as u64;
                 }
                 X86_CPUID_XSAVE => {
                     if subleaf == 0 {
@@ -238,11 +237,8 @@ fn handle_cpuid(
                     // to enable INVPCID bit in secondary processor based controls.
                     // Therefore explicitly clear INVPCID bit in CPUID if the VMX flag
                     // wasn't set.
-                    // FIXME: here vmcs.read32(VmcsField32::PROCBASED_CTLS2) in zircon
-                    if (vmcs.read32(VmcsField32::SECONDARY_VM_EXEC_CONTROL)
-                        & K_PROCBASED_CTLS2_INVPCID)
-                        == 0
-                    {
+                    // FIXME: here vmcs.read32(PROCBASED_CTLS2) in zircon
+                    if (vmcs.read32(SECONDARY_VM_EXEC_CONTROL) & K_PROCBASED_CTLS2_INVPCID) == 0 {
                         guest_state.rbx &= !(164 << X86_FEATURE_INVPCID.bit);
                     }
                     // Disable the Processor Trace bit.
@@ -423,7 +419,7 @@ fn handle_ept_violation(
     vmcs: &mut AutoVmcs,
     traps: &RwLock<TrapMap>,
 ) -> ExitResult {
-    let guest_paddr = vmcs.read64(VmcsField64::GUEST_PHYSICAL_ADDRESS) as usize;
+    let guest_paddr = vmcs.read64(GUEST_PHYSICAL_ADDRESS) as usize;
     trace!(
         "[RVM] VM exit: EPT violation @ {:#x} RIP({:#x})",
         guest_paddr,

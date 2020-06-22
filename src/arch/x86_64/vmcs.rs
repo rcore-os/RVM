@@ -4,6 +4,7 @@ use bitflags::bitflags;
 use x86::bits64::vmx;
 
 use crate::{RvmError, RvmResult};
+use VmcsField32::*;
 
 /// 16-Bit VMCS Fields.
 #[repr(u32)]
@@ -551,20 +552,18 @@ impl AutoVmcs {
 
     pub fn interrupt_window_exiting(&mut self, enable: bool) {
         let mut ctrl = unsafe {
-            CpuBasedVmExecControls::from_bits_unchecked(
-                self.read32(VmcsField32::CPU_BASED_VM_EXEC_CONTROL),
-            )
+            CpuBasedVmExecControls::from_bits_unchecked(self.read32(CPU_BASED_VM_EXEC_CONTROL))
         };
         ctrl.set(CpuBasedVmExecControls::INTR_WINDOW_EXITING, enable);
-        self.write32(VmcsField32::CPU_BASED_VM_EXEC_CONTROL, ctrl.bits());
+        self.write32(CPU_BASED_VM_EXEC_CONTROL, ctrl.bits());
     }
 
     pub fn issue_interrupt(&mut self, vector: u8) {
         let info = InterruptionInfo::from_vector(vector);
         if info.contains(InterruptionInfo::ERROR_CODE) {
-            self.write32(VmcsField32::VM_ENTRY_EXCEPTION_ERROR_CODE, 0);
+            self.write32(VM_ENTRY_EXCEPTION_ERROR_CODE, 0);
         }
-        self.write32(VmcsField32::VM_ENTRY_INTR_INFO, info.bits());
+        self.write32(VM_ENTRY_INTR_INFO, info.bits());
     }
 
     pub fn read16(&self, field: VmcsField16) -> u16 {
