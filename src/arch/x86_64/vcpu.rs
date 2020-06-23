@@ -669,6 +669,7 @@ unsafe extern "sysv64" fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
     llvm_asm!("
     // Store the guest registers not covered by the VMCS. At this point,
     // vmx_state is in RSP.
+    add     rsp, 18 * 8
     push    r15
     push    r14
     push    r13
