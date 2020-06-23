@@ -12,6 +12,7 @@ use super::{
 use crate::interrupt::InterruptController;
 use crate::{packet::RvmExitPacket, RvmError, RvmResult};
 use alloc::{boxed::Box, sync::Arc};
+use bit_field::BitField;
 use core::fmt::{Debug, Formatter, Result};
 use core::sync::atomic::{AtomicBool, Ordering};
 use x86::{bits64::vmx, msr};
@@ -139,7 +140,6 @@ impl InterruptState {
         if vector > VirtualizationException && vector < IRQ0 {
             return Err(RvmError::NotSupported);
         } else {
-            use bit_field::BitField;
             use InterruptibilityState as IntrState;
             let intr_state =
                 IntrState::from_bits_truncate(vmcs.read32(GUEST_INTERRUPTIBILITY_STATE));
@@ -255,16 +255,18 @@ impl Vcpu {
         vmcs.write16(HOST_DS_SELECTOR, x86::segmentation::ds().bits());
         vmcs.write16(HOST_FS_SELECTOR, x86::segmentation::fs().bits());
         vmcs.write16(HOST_GS_SELECTOR, x86::segmentation::gs().bits());
-        vmcs.write16(HOST_TR_SELECTOR, x86::task::tr().bits());
+        let tr = x86::task::tr().bits() & 0xf8;
+        assert_ne!(tr, 0, "TR must not be 0");
+        vmcs.write16(HOST_TR_SELECTOR, tr);
 
         vmcs.writeXX(HOST_FS_BASE, Msr::new(msr::IA32_FS_BASE).read() as usize);
         vmcs.writeXX(HOST_GS_BASE, Msr::new(msr::IA32_GS_BASE).read() as usize);
+        vmcs.writeXX(HOST_TR_BASE, tr_base(tr) as usize);
+
         let mut dtp = x86::dtables::DescriptorTablePointer::new(&0u64);
-        llvm_asm!("str ($0)" :: "r"(&mut dtp) :: "volatile");
-        vmcs.writeXX(HOST_TR_BASE, dtp.base as usize);
-        llvm_asm!("sgdt ($0)" :: "r"(&mut dtp) :: "volatile");
+        llvm_asm!("sgdt ($0)" :: "r"(&mut dtp) : "memory" : "volatile");
         vmcs.writeXX(HOST_GDTR_BASE, dtp.base as usize);
-        llvm_asm!("sidt ($0)" :: "r"(&mut dtp) :: "volatile");
+        llvm_asm!("sidt ($0)" :: "r"(&mut dtp) : "memory" : "volatile");
         vmcs.writeXX(HOST_IDTR_BASE, dtp.base as usize);
 
         vmcs.writeXX(HOST_IA32_SYSENTER_ESP, 0);
@@ -792,4 +794,18 @@ impl Debug for VmInstructionError {
             self.explain()
         )
     }
+}
+
+/// Get TR base.
+unsafe fn tr_base(tr: u16) -> u64 {
+    let mut dtp = x86::dtables::DescriptorTablePointer::new(&0u64);
+    llvm_asm!("sgdt ($0)" :: "r"(&mut dtp) : "memory" : "volatile");
+    let tss_descriptor = (dtp.base as usize + tr as usize) as *mut u64;
+    let low = tss_descriptor.read();
+    let high = tss_descriptor.add(1).read();
+    let mut tr_base = 0u64;
+    tr_base.set_bits(0..24, low.get_bits(16..40));
+    tr_base.set_bits(24..32, low.get_bits(56..64));
+    tr_base.set_bits(32..64, high.get_bits(0..32));
+    tr_base
 }

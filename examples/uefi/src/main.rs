@@ -1,5 +1,7 @@
 #![no_std]
 #![no_main]
+#![feature(asm)]
+#![feature(vec_leak)]
 #![feature(abi_efiapi)]
 
 extern crate alloc;
@@ -18,6 +20,7 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
     // log::set_max_level(log::LevelFilter::Trace);
     info!("RVM example");
 
+    setup_tss();
     let guest = Guest::new().unwrap();
     let mut vcpu = Vcpu::new(1, guest.clone()).unwrap();
 
@@ -47,6 +50,48 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
     info!("{:#x?}", vcpu.read_state().unwrap());
 
     panic!();
+}
+
+/// Extend GDT and setup TSS.
+fn setup_tss() {
+    use alloc::boxed::Box;
+    use alloc::vec::Vec;
+    use core::mem::size_of;
+    use x86_64::instructions::tables::{lgdt, load_tss};
+    use x86_64::structures::gdt::{Descriptor, SegmentSelector};
+    use x86_64::structures::tss::TaskStateSegment;
+    use x86_64::structures::DescriptorTablePointer;
+    use x86_64::PrivilegeLevel;
+
+    let tss = Box::new(TaskStateSegment::new());
+    let tss: &'static _ = Box::leak(tss);
+    let (tss0, tss1) = match Descriptor::tss_segment(tss) {
+        Descriptor::SystemSegment(tss0, tss1) => (tss0, tss1),
+        _ => unreachable!(),
+    };
+
+    unsafe {
+        // get current GDT
+        let mut gdtp = DescriptorTablePointer { limit: 0, base: 0 };
+        asm!("sgdt [{}]", in(reg) &mut gdtp);
+        let entry_count = (gdtp.limit + 1) as usize / size_of::<u64>();
+        let old_gdt = core::slice::from_raw_parts(gdtp.base as *const u64, entry_count);
+
+        // allocate new GDT with 2 more entries
+        let mut gdt = Vec::from(old_gdt);
+        gdt.extend([tss0, tss1].iter());
+        let gdt = Vec::leak(gdt);
+
+        // load new GDT and TSS
+        lgdt(&DescriptorTablePointer {
+            limit: gdt.len() as u16 * 8 - 1,
+            base: gdt.as_ptr() as _,
+        });
+        load_tss(SegmentSelector::new(
+            entry_count as u16,
+            PrivilegeLevel::Ring0,
+        ));
+    }
 }
 
 #[no_mangle]
