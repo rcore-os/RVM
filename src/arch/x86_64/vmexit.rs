@@ -10,15 +10,11 @@ use super::vmcs::{VmcsField16::*, VmcsField32::*, VmcsField64::*, VmcsFieldXX::*
 use crate::packet::*;
 use crate::trap_map::{TrapKind, TrapMap};
 use crate::{RvmError, RvmResult};
+use core::convert::TryInto;
 
 type ExitResult = RvmResult<Option<RvmExitPacket>>;
 
-const K_HYP_VENDOR_ID: VendorInfo = VendorInfo {
-    vendor_string: [
-        // "KVMKVMKVM\0\0\0"
-        b'K', b'V', b'M', b'K', b'V', b'M', b'K', b'V', b'M', 0u8, 0u8, 0u8,
-    ],
-};
+const VENDOR_STRING: &str = "KVMKVMKVM\0\0\0";
 
 const K_FIRST_EXTENDED_STATE_COMPONENT: u32 = 2;
 const K_LAST_EXTENDED_STATE_COMPONENT: u32 = 9;
@@ -41,7 +37,7 @@ impl ExitInfo {
     fn from(vmcs: &AutoVmcs) -> Self {
         let full_reason = vmcs.read32(VM_EXIT_REASON);
         Self {
-            exit_reason: full_reason.get_bits(0..16).into(),
+            exit_reason: full_reason.get_bits(0..16).try_into().unwrap(),
             entry_failure: full_reason.get_bit(31),
             exit_instruction_length: vmcs.read32(VM_EXIT_INSTRUCTION_LEN),
             exit_qualification: vmcs.readXX(EXIT_QUALIFICATION),
@@ -134,21 +130,19 @@ fn handle_cpuid(
 
     exit_info.next_rip(vmcs);
 
-    const X86_CPUID_BASE: u32 = x86_cpuid_leaf_num::X86_CPUID_BASE as u32;
-    const X86_CPUID_EXT_BASE: u32 = x86_cpuid_leaf_num::X86_CPUID_EXT_BASE as u32;
+    const X86_CPUID_BASE: u32 = X86CpuidLeafNum::BASE as u32;
+    const X86_CPUID_EXT_BASE: u32 = X86CpuidLeafNum::EXT_BASE as u32;
     const X86_CPUID_BASE_PLUS_ONE: u32 = X86_CPUID_BASE + 1;
     const X86_CPUID_EXT_BASE_PLUS_ONE: u32 = X86_CPUID_EXT_BASE + 1;
-    const X86_CPUID_MODEL_FEATURES: u32 = x86_cpuid_leaf_num::X86_CPUID_MODEL_FEATURES as u32;
-    const X86_CPUID_TOPOLOGY: u32 = x86_cpuid_leaf_num::X86_CPUID_TOPOLOGY as u32;
-    const X86_CPUID_XSAVE: u32 = x86_cpuid_leaf_num::X86_CPUID_XSAVE as u32;
-    const X86_CPUID_THERMAL_AND_POWER: u32 = x86_cpuid_leaf_num::X86_CPUID_THERMAL_AND_POWER as u32;
-    const X86_CPUID_PERFORMANCE_MONITORING: u32 =
-        x86_cpuid_leaf_num::X86_CPUID_PERFORMANCE_MONITORING as u32;
-    const X86_CPUID_MON: u32 = x86_cpuid_leaf_num::X86_CPUID_MON as u32;
-    const X86_CPUID_EXTENDED_FEATURE_FLAGS: u32 =
-        x86_cpuid_leaf_num::X86_CPUID_EXTENDED_FEATURE_FLAGS as u32;
-    const X86_CPUID_HYP_BASE: u32 = x86_cpuid_leaf_num::X86_CPUID_HYP_BASE as u32;
-    const X86_CPUID_KVM_FEATURES: u32 = x86_cpuid_leaf_num::X86_CPUID_KVM_FEATURES as u32;
+    const X86_CPUID_MODEL_FEATURES: u32 = X86CpuidLeafNum::MODEL_FEATURES as u32;
+    const X86_CPUID_TOPOLOGY: u32 = X86CpuidLeafNum::TOPOLOGY as u32;
+    const X86_CPUID_XSAVE: u32 = X86CpuidLeafNum::XSAVE as u32;
+    const X86_CPUID_THERMAL_AND_POWER: u32 = X86CpuidLeafNum::THERMAL_AND_POWER as u32;
+    const X86_CPUID_PERFORMANCE_MONITORING: u32 = X86CpuidLeafNum::PERFORMANCE_MONITORING as u32;
+    const X86_CPUID_MON: u32 = X86CpuidLeafNum::MON as u32;
+    const X86_CPUID_EXTENDED_FEATURE_FLAGS: u32 = X86CpuidLeafNum::EXTENDED_FEATURE_FLAGS as u32;
+    const X86_CPUID_HYP_BASE: u32 = X86CpuidLeafNum::HYP_BASE as u32;
+    const X86_CPUID_KVM_FEATURES: u32 = X86CpuidLeafNum::KVM_FEATURES as u32;
 
     match leaf {
         X86_CPUID_BASE | X86_CPUID_EXT_BASE => {
@@ -161,58 +155,54 @@ fn handle_cpuid(
             match leaf {
                 X86_CPUID_MODEL_FEATURES => {
                     // Override the initial local APIC ID. From Vol 2, Table 3-8.
-                    guest_state.rbx &= !(0xff << 24);
-                    guest_state.rbx |= ((vmcs.read16(VIRTUAL_PROCESSOR_ID) - 1) as u64) << 24;
+                    guest_state
+                        .rbx
+                        .set_bits(24..32, (vmcs.read16(VIRTUAL_PROCESSOR_ID) - 1) as u64);
                     // Enable the hypervisor bit.
-                    guest_state.rcx |= 1u64 << X86_FEATURE_HYPERVISOR.bit;
+                    guest_state.rcx.set_bit(X86_FEATURE_HYPERVISOR.bit, true);
                     // Enable the x2APIC bit.
-                    guest_state.rcx |= 1u64 << X86_FEATURE_X2APIC.bit;
+                    guest_state.rcx.set_bit(X86_FEATURE_X2APIC.bit, true);
                     // Disable the VMX bit.
-                    guest_state.rcx &= !(1u64 << X86_FEATURE_VMX.bit);
+                    guest_state.rcx.set_bit(X86_FEATURE_VMX.bit, false);
                     // Disable the PDCM bit.
-                    guest_state.rcx &= !(1u64 << X86_FEATURE_PDCM.bit);
+                    guest_state.rcx.set_bit(X86_FEATURE_PDCM.bit, false);
                     // Disable MONITOR/MWAIT.
-                    guest_state.rcx &= !(1u64 << X86_FEATURE_MON.bit);
+                    guest_state.rcx.set_bit(X86_FEATURE_MON.bit, false);
                     // Disable THERM_INTERRUPT and THERM_STATUS MSRs
-                    guest_state.rcx &= !(1u64 << X86_FEATURE_TM2.bit);
+                    guest_state.rcx.set_bit(X86_FEATURE_TM2.bit, false);
                     // Enable the SEP (SYSENTER support).
-                    guest_state.rdx |= 1u64 << X86_FEATURE_SEP.bit;
+                    guest_state.rdx.set_bit(X86_FEATURE_SEP.bit, true);
                     // Disable the Thermal Monitor bit.
-                    guest_state.rdx &= !(1u64 << X86_FEATURE_TM.bit);
+                    guest_state.rdx.set_bit(X86_FEATURE_TM.bit, false);
                     // Disable the THERM_CONTROL_MSR bit.
-                    guest_state.rdx &= !(1u64 << X86_FEATURE_ACPI.bit);
+                    guest_state.rdx.set_bit(X86_FEATURE_ACPI.bit, false);
                 }
                 X86_CPUID_TOPOLOGY => {
                     guest_state.rdx = (vmcs.read16(VIRTUAL_PROCESSOR_ID) - 1) as u64;
                 }
                 X86_CPUID_XSAVE => {
                     if subleaf == 0 {
-                        let mut xsave_size = 0u32;
-                        let status = compute_xsave_size(guest_state.xcr0, &mut xsave_size);
-                        if status.is_err() {
-                            return status;
-                        }
+                        let xsave_size = compute_xsave_size(guest_state.xcr0);
                         guest_state.rbx = xsave_size as u64;
                     } else if subleaf == 1 {
-                        guest_state.rax &= !(1u64 << 3);
+                        guest_state.rax.set_bit(3, false);
                     }
                 }
                 X86_CPUID_THERMAL_AND_POWER => {
                     // Disable the performance energy bias bit.
-                    guest_state.rcx &= !(1u64 << X86_FEATURE_PERF_BIAS.bit);
+                    guest_state.rcx.set_bit(X86_FEATURE_PERF_BIAS.bit, false);
                     // Disable the hardware coordination feedback bit.
-                    guest_state.rcx &= !(1u64 << X86_FEATURE_HW_FEEDBACK.bit);
-                    guest_state.rax &= !(
-                        // Disable Digital Thermal Sensor
-                        (1u64 << X86_FEATURE_DTS.bit) |
-                        // Disable Package Thermal Status MSR.
-                        (1u64 << X86_FEATURE_PTM.bit) |
-                        // Disable THERM_STATUS MSR bits 10/11 & THERM_INTERRUPT MSR bit 24
-                        (1u64 << X86_FEATURE_PTM.bit) |
-                        // Disable HWP MSRs.
-                        (1u64 << X86_FEATURE_HWP.bit) | (1u64 << X86_FEATURE_HWP_NOT.bit) |
-                        (1u64 << X86_FEATURE_HWP_ACT.bit) | (1u64 << X86_FEATURE_HWP_PREF.bit)
-                    );
+                    guest_state.rcx.set_bit(X86_FEATURE_HW_FEEDBACK.bit, false);
+                    // Disable Digital Thermal Sensor
+                    guest_state.rax.set_bit(X86_FEATURE_DTS.bit, false);
+                    // Disable Package Thermal Status MSR.
+                    guest_state.rax.set_bit(X86_FEATURE_PTM.bit, false);
+                    // Disable THERM_STATUS MSR bits 10/11 & THERM_INTERRUPT MSR bit 24
+                    // Disable HWP MSRs.
+                    guest_state.rax.set_bit(X86_FEATURE_HWP.bit, false);
+                    guest_state.rax.set_bit(X86_FEATURE_HWP_NOT.bit, false);
+                    guest_state.rax.set_bit(X86_FEATURE_HWP_ACT.bit, false);
+                    guest_state.rax.set_bit(X86_FEATURE_HWP_PREF.bit, false);
                 }
                 X86_CPUID_PERFORMANCE_MONITORING => {
                     // Disable all performance monitoring.
@@ -238,21 +228,23 @@ fn handle_cpuid(
                     // wasn't set.
                     // FIXME: here vmcs.read32(PROCBASED_CTLS2) in zircon
                     if (vmcs.read32(SECONDARY_VM_EXEC_CONTROL) & K_PROCBASED_CTLS2_INVPCID) == 0 {
-                        guest_state.rbx &= !(164 << X86_FEATURE_INVPCID.bit);
+                        guest_state.rbx.set_bit(X86_FEATURE_INVPCID.bit, false);
                     }
                     // Disable the Processor Trace bit.
-                    guest_state.rbx &= !(1u64 << X86_FEATURE_PT.bit);
+                    guest_state.rbx.set_bit(X86_FEATURE_PT.bit, false);
                     // Disable:
                     //  * Indirect Branch Prediction Barrier bit
                     //  * Single Thread Indirect Branch Predictors bit
                     //  * Speculative Store Bypass Disable bit
                     // These imply support for the IA32_SPEC_CTRL and IA32_PRED_CMD
                     // MSRs, which are not implemented.
-                    guest_state.rdx &= !(1u64 << X86_FEATURE_IBRS_IBPB.bit
-                        | 1u64 << X86_FEATURE_STIBP.bit
-                        | 1u64 << X86_FEATURE_SSBD.bit);
+                    guest_state.rdx.set_bit(X86_FEATURE_IBRS_IBPB.bit, false);
+                    guest_state.rdx.set_bit(X86_FEATURE_STIBP.bit, false);
+                    guest_state.rdx.set_bit(X86_FEATURE_SSBD.bit, false);
                     // Disable support of IA32_ARCH_CAPABILITIES MSR.
-                    guest_state.rdx &= !(1u64 << X86_FEATURE_ARCH_CAPABILITIES.bit);
+                    guest_state
+                        .rdx
+                        .set_bit(X86_FEATURE_ARCH_CAPABILITIES.bit, false);
                 }
                 _ => unreachable!(),
             };
@@ -266,9 +258,10 @@ fn handle_cpuid(
             // should be interpreted as 0x40000001. Details are available in the
             // Linux kernel documentation (Documentation/virtual/kvm/cpuid.txt).
             guest_state.rax = X86_CPUID_KVM_FEATURES as u64;
-            unsafe { guest_state.rbx = K_HYP_VENDOR_ID.vendor_id[0] as u64 };
-            unsafe { guest_state.rcx = K_HYP_VENDOR_ID.vendor_id[1] as u64 };
-            unsafe { guest_state.rdx = K_HYP_VENDOR_ID.vendor_id[2] as u64 };
+            let vendor_id = unsafe { &*(VENDOR_STRING.as_ptr() as *const [u32; 3]) };
+            guest_state.rbx = vendor_id[0] as u64;
+            guest_state.rcx = vendor_id[1] as u64;
+            guest_state.rdx = vendor_id[2] as u64;
             Ok(None)
         }
         X86_CPUID_KVM_FEATURES => {
@@ -286,24 +279,22 @@ fn handle_cpuid(
         }
     }
 }
-fn compute_xsave_size(guest_xcr0: u64, xsave_size: &mut u32) -> ExitResult {
-    *xsave_size = K_XSAVE_LEGACY_REGION_SIZE + K_XSAVE_HEADER_SIZE;
+
+fn compute_xsave_size(guest_xcr0: u64) -> u32 {
+    let mut xsave_size = K_XSAVE_LEGACY_REGION_SIZE + K_XSAVE_HEADER_SIZE;
     for i in K_FIRST_EXTENDED_STATE_COMPONENT..=K_LAST_EXTENDED_STATE_COMPONENT {
-        let mut leaf: cpuid_leaf = cpuid_leaf::default();
-        if (guest_xcr0 & (1 << i)) == 0 {
+        if !guest_xcr0.get_bit(i as usize) {
             continue;
         }
-        if x86_get_cpuid_subleaf(x86_cpuid_leaf_num::X86_CPUID_XSAVE, i, &mut leaf) == false {
-            panic!("[RVM] run x86_get_cpuid_subleaf failed");
-        }
-        if leaf.a == 0 && leaf.b == 0 && leaf.c == 0 && leaf.d == 0 {
+        let leaf = raw_cpuid::cpuid!(X86CpuidLeafNum::XSAVE as u32, i);
+        if leaf.eax == 0 && leaf.ebx == 0 && leaf.ecx == 0 && leaf.edx == 0 {
             continue;
         }
-        let component_offset = leaf.b;
-        let component_size = leaf.a;
-        *xsave_size = component_offset + component_size;
+        let component_offset = leaf.ebx;
+        let component_size = leaf.eax;
+        xsave_size = component_offset + component_size;
     }
-    Ok(None)
+    xsave_size
 }
 
 fn handle_vmcall(

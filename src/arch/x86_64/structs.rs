@@ -7,7 +7,6 @@ use x86::{bits64::vmx, msr};
 use x86_64::registers::control::{Cr0, Cr4, Cr4Flags};
 
 use super::consts::PAGE_SIZE;
-use super::feature::x86_feature_init;
 use super::msr::*;
 use crate::memory::{alloc_frame, dealloc_frame, phys_to_virt};
 use crate::{RvmError, RvmResult};
@@ -230,8 +229,6 @@ impl VmmState {
             }
             info!("[RVM] successed to turn on VMX on CPU {}", cpu_num);
         }
-
-        x86_feature_init();
 
         Ok(())
     }
