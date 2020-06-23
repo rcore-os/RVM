@@ -186,7 +186,7 @@ pub struct Vcpu {
 }
 
 impl Vcpu {
-    pub fn new(vpid: u16, guest: Arc<Guest>) -> RvmResult<Box<Self>> {
+    pub fn new(vpid: u16, entry: u64, guest: Arc<Guest>) -> RvmResult<Box<Self>> {
         // TODO pin thread
         assert_ne!(vpid, 0);
         let vmx_basic = VmxBasic::read();
@@ -205,7 +205,7 @@ impl Vcpu {
             guest_msr_list,
             interrupt_state: InterruptState::new(),
         });
-        vcpu.init(0)?;
+        vcpu.init(entry)?;
         Ok(vcpu)
     }
 
@@ -701,7 +701,7 @@ unsafe extern "sysv64" fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
     popf
 "
     :
-    : 
+    :
     : "cc", "memory",
       "rax", "rbx", "rcx", "rdx", "rdi", "rsi"
       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"

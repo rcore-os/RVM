@@ -3,6 +3,7 @@
 #![feature(asm)]
 #![feature(vec_leak)]
 #![feature(abi_efiapi)]
+#![feature(llvm_asm)]
 
 extern crate alloc;
 #[macro_use]
@@ -13,6 +14,21 @@ use rvm::*;
 use uefi::prelude::*;
 use uefi::table::boot::*;
 
+pub unsafe extern "C" fn hypercall() {
+    for i in 0.. {
+        llvm_asm!(
+            "vmcall"
+            :
+            : "{ax}"(i),
+              "{bx}"(2),
+              "{cx}"(3),
+              "{dx}"(3),
+              "{si}"(3)
+            :
+            : "volatile");
+    }
+}
+
 #[entry]
 fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
     // Initialize utilities (logging, memory allocation...)
@@ -21,8 +37,24 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
     info!("RVM example");
 
     setup_tss();
+    let entry = 0x1000;
     let guest = Guest::new().unwrap();
-    let mut vcpu = Vcpu::new(1, guest.clone()).unwrap();
+    let mut vcpu = Vcpu::new(1, entry as u64, guest.clone()).unwrap();
+
+    for i in 0..0x10 {
+        let guest_paddr = i * 0x1000;
+        let host_paddr = alloc_frame();
+        if guest_paddr == entry {
+            unsafe {
+                core::ptr::copy(
+                    hypercall as usize as *const u8,
+                    host_paddr as *mut u8,
+                    0x100,
+                );
+            }
+        }
+        guest.add_memory_region(guest_paddr, host_paddr, 0x1000);
+    }
 
     vcpu.write_state(&vcpu::GuestState {
         xcr0: 0,
