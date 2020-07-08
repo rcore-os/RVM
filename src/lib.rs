@@ -2,7 +2,6 @@
 
 #![no_std]
 #![feature(llvm_asm)]
-#![feature(linkage)]
 #![feature(naked_functions)]
 #![feature(untagged_unions)]
 #![deny(warnings)]
@@ -21,6 +20,7 @@ mod packet;
 mod trap_map;
 
 pub use arch::*;
+pub use rvm_macros::*;
 
 pub type RvmResult<T = ()> = Result<T, RvmError>;
 

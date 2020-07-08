@@ -1,0 +1,15 @@
+[package]
+name = "rvm_macros"
+version = "0.1.0"
+authors = ["equation314 <equation618@gmail.com>"]
+edition = "2018"
+description = "Macros for defining RVM external functions"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1.0.33", features = ["full"] }
+quote = "1.0.7"

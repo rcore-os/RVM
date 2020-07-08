@@ -43,7 +43,7 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
 
     for i in 0..0x10 {
         let guest_paddr = i * 0x1000;
-        let host_paddr = alloc_frame();
+        let host_paddr = alloc_frame().unwrap();
         if guest_paddr == entry {
             unsafe {
                 core::ptr::copy(
@@ -53,7 +53,7 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
                 );
             }
         }
-        guest.add_memory_region(guest_paddr, host_paddr, 0x1000);
+        guest.add_memory_region(guest_paddr, host_paddr, 0x1000).unwrap();
     }
 
     vcpu.write_state(&vcpu::GuestState {
@@ -77,7 +77,7 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
     })
     .unwrap();
 
-    vcpu.resume();
+    vcpu.resume().unwrap();
 
     info!("{:#x?}", vcpu.read_state().unwrap());
 
@@ -126,19 +126,19 @@ fn setup_tss() {
     }
 }
 
-#[no_mangle]
-extern "C" fn alloc_frame() -> usize {
+#[rvm::extern_fn(alloc_frame)]
+fn alloc_frame() -> Option<usize> {
     let st = unsafe { &*uefi_services::system_table().as_ptr() };
     let paddr = st
         .boot_services()
         .allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, 1)
         .expect_success("failed to allocate pages");
     trace!("alloc_frame: {:#x}", paddr);
-    paddr as usize
+    Some(paddr as usize)
 }
 
-#[no_mangle]
-extern "C" fn dealloc_frame(paddr: usize) {
+#[rvm::extern_fn(dealloc_frame)]
+fn dealloc_frame(paddr: usize) {
     let st = unsafe { &*uefi_services::system_table().as_ptr() };
     st.boot_services()
         .free_pages(paddr as u64, 1)
@@ -147,7 +147,7 @@ extern "C" fn dealloc_frame(paddr: usize) {
 }
 
 /// Convert physical address to virtual address
-#[no_mangle]
-extern "C" fn phys_to_virt(paddr: usize) -> usize {
+#[rvm::extern_fn(phys_to_virt)]
+fn phys_to_virt(paddr: usize) -> usize {
     paddr
 }
