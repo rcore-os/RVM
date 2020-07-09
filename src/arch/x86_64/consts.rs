@@ -1,7 +1,5 @@
 #![allow(dead_code, non_upper_case_globals)]
 
-pub const PAGE_SIZE: usize = 0x1000;
-
 pub const DivideError: u8 = 0;
 pub const Debug: u8 = 1;
 pub const NonMaskableInterrupt: u8 = 2;

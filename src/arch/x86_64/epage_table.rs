@@ -3,8 +3,7 @@
 
 #![allow(dead_code)]
 
-use super::consts::PAGE_SIZE;
-use crate::memory::*;
+use crate::{ffi::*, GuestPhysAddr, HostPhysAddr, PAGE_SIZE};
 
 const MASK_PAGE_ALIGNED: usize = PAGE_SIZE - 1;
 
@@ -26,17 +25,27 @@ impl EPageTable {
     }
 
     /// Return EPT value (i.e. the physical address of root extended page table)
-    pub fn pointer(&self) -> usize {
+    pub fn table_phys(&self) -> HostPhysAddr {
+        self.ept_page_root
+    }
+
+    pub fn ept_pointer(table_phys: HostPhysAddr) -> u64 {
         let mut eptp = EPageTablePointer::new();
         eptp.set_dirty_and_access_enabled(true);
         eptp.set_memory_type(6);
         eptp.set_page_walk_length(3);
-        eptp.set_epage_table_root(self.ept_page_root);
-        eptp.value()
+        eptp.set_epage_table_root(table_phys);
+        eptp.value() as u64
     }
 
     /// Map a guest physical page to host physical page.
     pub fn map(&mut self, guest_paddr: GuestPhysAddr, host_paddr: HostPhysAddr) -> EPageEntry {
+        trace!(
+            "[RVM] EPT map: {:x?} -> {:x?}, flags=?? in {:#x?}",
+            guest_paddr,
+            host_paddr,
+            self.ept_page_root
+        );
         let mut entry = self.get_entry(guest_paddr);
         assert!(!entry.is_present());
         entry.set_physical_address(host_paddr);

@@ -4,7 +4,7 @@ mod consts;
 mod epage_table;
 mod exit_reason;
 mod feature;
-pub mod guest;
+mod guest;
 mod msr;
 mod structs;
 mod timer;
@@ -12,6 +12,7 @@ pub mod vcpu;
 mod vmcs;
 mod vmexit;
 
+pub use epage_table::EPageTable;
 pub use guest::Guest;
 pub use vcpu::Vcpu;
 

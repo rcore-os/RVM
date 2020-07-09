@@ -23,16 +23,6 @@ impl PitTimer {
     const FREQ: usize = 1193182;
     pub const IRQ_NUM: u8 = IRQ0 + Timer;
 
-    pub fn new() -> Self {
-        let inner = VirtualTimer::default();
-        Self {
-            read_state: Lsb,
-            write_state: Lsb,
-            count: 0,
-            inner,
-        }
-    }
-
     fn count_to_us(&self) -> usize {
         (self.count as u64 * 1_000_000u64 / Self::FREQ as u64) as usize
     }
@@ -63,6 +53,18 @@ impl PitTimer {
                     .set_count(self.count_to_us() / super::consts::USEC_PER_TICK);
                 self.inner.set_enable(true);
             }
+        }
+    }
+}
+
+impl Default for PitTimer {
+    fn default() -> Self {
+        let inner = VirtualTimer::default();
+        Self {
+            read_state: Lsb,
+            write_state: Lsb,
+            count: 0,
+            inner,
         }
     }
 }

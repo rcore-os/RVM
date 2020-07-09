@@ -14,7 +14,7 @@ use rvm::*;
 use uefi::prelude::*;
 use uefi::table::boot::*;
 
-pub unsafe extern "C" fn hypercall() {
+unsafe extern "C" fn hypercall() {
     for i in 0.. {
         llvm_asm!(
             "vmcall"
@@ -29,22 +29,16 @@ pub unsafe extern "C" fn hypercall() {
     }
 }
 
-#[entry]
-fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
-    // Initialize utilities (logging, memory allocation...)
-    uefi_services::init(&st).expect_success("failed to initialize utilities");
-    // log::set_max_level(log::LevelFilter::Trace);
-    info!("RVM example");
-
-    setup_tss();
+fn run_hypervisor() -> RvmResult {
     let entry = 0x1000;
-    let guest = Guest::new().unwrap();
-    let mut vcpu = Vcpu::new(1, entry as u64, guest.clone()).unwrap();
+    let gpm = DefaultGuestPhysMemorySet::new();
+    let guest = Guest::new(gpm)?;
+    let mut vcpu = Vcpu::new(1, entry as u64, guest.clone())?;
 
     for i in 0..0x10 {
         let guest_paddr = i * 0x1000;
-        let host_paddr = alloc_frame().unwrap();
         if guest_paddr == entry {
+            let host_paddr = alloc_frame().unwrap();
             unsafe {
                 core::ptr::copy(
                     hypercall as usize as *const u8,
@@ -52,8 +46,10 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
                     0x100,
                 );
             }
+            guest.add_memory_region(guest_paddr, 0x1000, Some(host_paddr))?
+        } else {
+            guest.add_memory_region(guest_paddr, 0x1000, None)?;
         }
-        guest.add_memory_region(guest_paddr, host_paddr, 0x1000).unwrap();
     }
 
     vcpu.write_state(&vcpu::GuestState {
@@ -74,12 +70,24 @@ fn efi_main(image: uefi::Handle, st: SystemTable<Boot>) -> Status {
         r13: 13,
         r14: 14,
         r15: 15,
-    })
-    .unwrap();
+    })?;
 
-    vcpu.resume().unwrap();
+    vcpu.resume()?;
 
-    info!("{:#x?}", vcpu.read_state().unwrap());
+    info!("{:#x?}", vcpu.read_state()?);
+
+    Ok(())
+}
+
+#[entry]
+fn efi_main(_image: uefi::Handle, st: SystemTable<Boot>) -> Status {
+    // Initialize utilities (logging, memory allocation...)
+    uefi_services::init(&st).expect_success("failed to initialize utilities");
+    // log::set_max_level(log::LevelFilter::Trace);
+    info!("RVM example");
+
+    setup_tss();
+    run_hypervisor().unwrap();
 
     panic!();
 }

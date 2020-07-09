@@ -1,6 +1,6 @@
 //! Some structures to manage traps caused by MMIO/PIO.
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{btree_map::Entry, BTreeMap};
 use core::convert::TryFrom;
 
 use crate::{RvmError, RvmResult};
@@ -76,11 +76,12 @@ impl TrapMap {
             size,
             key,
         };
-        if traps.contains_key(&addr) {
-            Err(RvmError::InvalidParam)
-        } else {
-            traps.insert(addr, trap);
+        let entry = traps.entry(addr);
+        if let Entry::Vacant(e) = entry {
+            e.insert(trap);
             Ok(())
+        } else {
+            Err(RvmError::InvalidParam)
         }
     }
 }

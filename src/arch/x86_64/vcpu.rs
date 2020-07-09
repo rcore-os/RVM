@@ -107,7 +107,7 @@ pub struct InterruptState {
 impl InterruptState {
     fn new() -> Self {
         Self {
-            timer: PitTimer::new(),
+            timer: PitTimer::default(),
             controller: InterruptController::new(u8::MAX as usize),
         }
     }
@@ -511,7 +511,7 @@ impl Vcpu {
         // treated as guest-physical addresses. Guest-physical addresses are
         // translated by traversing a set of EPT paging structures to produce
         // physical addresses that are used to access memory.
-        let eptp = self.guest.extended_page_table_pointer() as u64;
+        let eptp = super::EPageTable::ept_pointer(self.guest.rvm_page_table_phys());
         vmcs.write64(EPT_POINTER, eptp);
 
         // From Volume 3, Section 28.3.3.4: Software can use an INVEPT with type all
@@ -560,6 +560,7 @@ impl Vcpu {
                 &mut vmcs,
                 &mut self.vmx_state.guest_state,
                 &mut self.interrupt_state,
+                &self.guest.gpm,
                 &self.guest.traps,
             )? {
                 Some(packet) => return Ok(packet), // forward to user mode handler

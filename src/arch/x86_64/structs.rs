@@ -6,10 +6,9 @@ use spin::Mutex;
 use x86::{bits64::vmx, msr};
 use x86_64::registers::control::{Cr0, Cr4, Cr4Flags};
 
-use super::consts::PAGE_SIZE;
 use super::msr::*;
-use crate::memory::{alloc_frame, dealloc_frame, phys_to_virt};
-use crate::{RvmError, RvmResult};
+use crate::ffi::{alloc_frame, dealloc_frame, phys_to_virt};
+use crate::{RvmError, RvmResult, PAGE_SIZE};
 
 /// A physical frame (or virtual page) of size PAGE_SIZE used as VMXON region,
 /// VMCS region, or MSR page, etc.

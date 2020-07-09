@@ -1,16 +1,18 @@
 //! VM exit handler
 
+use alloc::sync::Arc;
 use bit_field::BitField;
+use core::convert::TryInto;
 use spin::RwLock;
 
 use super::exit_reason::ExitReason;
 use super::feature::*;
 use super::vcpu::{GuestState, InterruptState};
 use super::vmcs::{VmcsField16::*, VmcsField32::*, VmcsField64::*, VmcsFieldXX::*, *};
+use crate::memory::GuestPhysMemorySetTrait;
 use crate::packet::*;
 use crate::trap_map::{TrapKind, TrapMap};
 use crate::{RvmError, RvmResult};
-use core::convert::TryInto;
 
 type ExitResult = RvmResult<Option<RvmExitPacket>>;
 
@@ -407,6 +409,7 @@ fn handle_mmio(
 fn handle_ept_violation(
     exit_info: &ExitInfo,
     vmcs: &mut AutoVmcs,
+    gpm: &Arc<RwLock<dyn GuestPhysMemorySetTrait>>,
     traps: &RwLock<TrapMap>,
 ) -> ExitResult {
     let guest_paddr = vmcs.read64(GUEST_PHYSICAL_ADDRESS) as usize;
@@ -416,12 +419,20 @@ fn handle_ept_violation(
         exit_info.guest_rip
     );
 
-    match handle_mmio(exit_info, vmcs, guest_paddr, traps)? {
-        Some(packet) => return Ok(Some(packet)),
-        None => {}
+    if let Some(packet) = handle_mmio(exit_info, vmcs, guest_paddr, traps)? {
+        return Ok(Some(packet));
     }
 
-    Err(RvmError::NoDeviceSpace)
+    match gpm.write().handle_page_fault(guest_paddr) {
+        Err(e) => {
+            warn!(
+                "[RVM] VM exit: Unhandled EPT violation @ {:#x}",
+                guest_paddr
+            );
+            Err(e)
+        }
+        _ => Ok(None),
+    }
 }
 
 /// The common handler of VM exits.
@@ -435,6 +446,7 @@ pub fn vmexit_handler(
     vmcs: &mut AutoVmcs,
     guest_state: &mut GuestState,
     interrupt_state: &mut InterruptState,
+    gpm: &Arc<RwLock<dyn GuestPhysMemorySetTrait>>,
     traps: &RwLock<TrapMap>,
 ) -> ExitResult {
     let exit_info = ExitInfo::from(vmcs);
@@ -448,7 +460,7 @@ pub fn vmexit_handler(
         ExitReason::IO_INSTRUCTION => {
             handle_io_instruction(&exit_info, vmcs, guest_state, interrupt_state, traps)
         }
-        ExitReason::EPT_VIOLATION => handle_ept_violation(&exit_info, vmcs, traps),
+        ExitReason::EPT_VIOLATION => handle_ept_violation(&exit_info, vmcs, gpm, traps),
         _ => Err(RvmError::NotSupported),
     };
 

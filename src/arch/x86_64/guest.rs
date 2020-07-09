@@ -3,52 +3,44 @@
 use alloc::sync::Arc;
 use spin::RwLock;
 
-use super::consts::PAGE_SIZE;
-use super::epage_table::EPageTable;
 use super::structs::VMM_STATE;
-use crate::memory::*;
+use crate::memory::{GuestPhysAddr, GuestPhysMemorySetTrait, HostPhysAddr};
 use crate::trap_map::{TrapKind, TrapMap};
+use crate::PAGE_SIZE;
 use crate::{RvmError, RvmResult};
 
 /// Represents a guest within the hypervisor.
 #[derive(Debug)]
 pub struct Guest {
-    page_table: RwLock<EPageTable>,
+    pub gpm: Arc<RwLock<dyn GuestPhysMemorySetTrait>>,
     pub traps: RwLock<TrapMap>,
 }
 
 impl Guest {
     /// Create a new Guest.
-    pub fn new() -> RvmResult<Arc<Self>> {
+    pub fn new(gpm: impl GuestPhysMemorySetTrait + 'static) -> RvmResult<Arc<Self>> {
         VMM_STATE.lock().alloc()?;
         Ok(Arc::new(Self {
-            page_table: RwLock::new(EPageTable::new()),
+            gpm: Arc::new(RwLock::new(gpm)),
             traps: RwLock::new(TrapMap::default()),
         }))
     }
 
-    /// Get extended page-table pointer.
-    pub fn extended_page_table_pointer(&self) -> usize {
-        self.page_table.read().pointer()
+    /// Get the page table base address.
+    pub fn rvm_page_table_phys(&self) -> usize {
+        self.gpm.read().table_phys()
     }
 
     pub fn add_memory_region(
         &self,
         gpaddr: GuestPhysAddr,
-        hpaddr: HostPhysAddr,
         size: usize,
+        hpaddr: Option<HostPhysAddr>,
     ) -> RvmResult {
-        assert_eq!(gpaddr % PAGE_SIZE, 0);
-        assert_eq!(hpaddr % PAGE_SIZE, 0);
-        assert_eq!(size % PAGE_SIZE, 0);
-        let mut pt = self.page_table.write();
-        for offset in (0..size).step_by(PAGE_SIZE) {
-            pt.map(gpaddr + offset, hpaddr + offset);
-        }
-        Ok(())
+        self.gpm.write().add_map(gpaddr, size, hpaddr)
     }
 
-    pub fn set_trap(&self, kind: TrapKind, addr: usize, size: usize, key: u64) -> RvmResult<()> {
+    pub fn set_trap(&self, kind: TrapKind, addr: usize, size: usize, key: u64) -> RvmResult {
         match kind {
             TrapKind::Io => {
                 if addr + size > u16::MAX as usize {
