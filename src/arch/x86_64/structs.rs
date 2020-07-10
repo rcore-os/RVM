@@ -50,7 +50,7 @@ impl VmxPage {
 
 impl Drop for VmxPage {
     fn drop(&mut self) {
-        info!("VmxPage free {:#x?}", self);
+        debug!("VmxPage free {:#x?}", self);
         dealloc_frame(self.paddr);
     }
 }
@@ -110,19 +110,16 @@ impl MsrList {
 
 /// Global VMX states used for all guests.
 #[derive(Default)]
-pub struct VmmState {
+pub struct VmmGlobalState {
     num_guests: usize,
     vmxon_pages: Vec<VmxPage>,
 }
 
 lazy_static! {
-    pub static ref VMM_STATE: Mutex<VmmState> = {
-        assert!(super::check_hypervisor_feature());
-        Mutex::new(VmmState::default())
-    };
+    pub static ref VMM_GLOBAL_STATE: Mutex<VmmGlobalState> = Mutex::new(VmmGlobalState::default());
 }
 
-impl VmmState {
+impl VmmGlobalState {
     pub fn alloc(&mut self) -> RvmResult<()> {
         if self.num_guests == 0 {
             // TODO: support multiple cpu

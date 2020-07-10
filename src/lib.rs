@@ -20,6 +20,7 @@ mod memory;
 mod packet;
 mod trap_map;
 
+#[cfg(target_arch = "x86_64")]
 pub use arch::*;
 pub use memory::*;
 pub use rvm_macros::*;

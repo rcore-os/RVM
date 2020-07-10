@@ -30,6 +30,10 @@ unsafe extern "C" fn hypercall() {
 }
 
 fn run_hypervisor() -> RvmResult {
+    if !check_hypervisor_feature() {
+        return Err(RvmError::NotSupported);
+    }
+
     let entry = 0x1000;
     let gpm = DefaultGuestPhysMemorySet::new();
     let guest = Guest::new(gpm)?;

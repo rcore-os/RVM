@@ -1,6 +1,7 @@
 //! The virtual CPU within a guest.
 
 use super::{
+    defines::VmInstructionError,
     msr::*,
     structs::{MsrList, VmxPage},
     timer::PitTimer,
@@ -13,7 +14,6 @@ use crate::interrupt::InterruptController;
 use crate::{packet::RvmExitPacket, RvmError, RvmResult};
 use alloc::{boxed::Box, sync::Arc};
 use bit_field::BitField;
-use core::fmt::{Debug, Formatter, Result};
 use core::sync::atomic::{AtomicBool, Ordering};
 use x86::{bits64::vmx, msr};
 use x86_64::{
@@ -511,13 +511,7 @@ impl Vcpu {
         // treated as guest-physical addresses. Guest-physical addresses are
         // translated by traversing a set of EPT paging structures to produce
         // physical addresses that are used to access memory.
-        let eptp = super::EPageTable::ept_pointer(self.guest.rvm_page_table_phys());
-        vmcs.write64(EPT_POINTER, eptp);
-
-        // From Volume 3, Section 28.3.3.4: Software can use an INVEPT with type all
-        // ALL_CONTEXT to prevent undesired retention of cached EPT information. Here,
-        // we only care about invalidating information associated with this EPTP.
-        invept(InvEptType::SingleContext, eptp);
+        vmcs.set_ept_pointer(self.guest.rvm_page_table_phys());
 
         // Setup MSR handling.
         vmcs.write64(MSR_BITMAP, 0); // TODO: msr_bitmap_addr
@@ -542,17 +536,17 @@ impl Vcpu {
             // VM Entry
             self.running.store(true, Ordering::SeqCst);
             trace!("[RVM] vmx entry");
-            let res = unsafe { vmx_entry(&mut self.vmx_state) };
+            let has_err = unsafe { vmx_entry(&mut self.vmx_state) };
             trace!("[RVM] vmx exit");
             self.running.store(false, Ordering::SeqCst);
 
-            res.map_err(|err| {
+            if has_err {
                 warn!(
                     "[RVM] VCPU resume failed: {:?}",
                     VmInstructionError::from(vmcs.read32(VM_INSTRUCTION_ERROR))
                 );
-                err
-            })?;
+                return Err(RvmError::Internal);
+            }
 
             // VM Exit
             self.vmx_state.resume = true;
@@ -589,7 +583,7 @@ impl Vcpu {
 
 impl Drop for Vcpu {
     fn drop(&mut self) {
-        info!("Vcpu free {:#x?}", self);
+        debug!("Vcpu free {:#x?}", self);
         // TODO pin thread
         unsafe { vmx::vmclear(self.vmcs_page.phys_addr()).unwrap() };
     }
@@ -597,9 +591,9 @@ impl Drop for Vcpu {
 
 #[naked]
 #[inline(never)]
-unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> {
+unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> bool {
     llvm_asm!("
-    // Store host callee save registers, return address, and processor flags.
+    // Store host callee save registers to stack, return address, and processor flags.
     pushf
     push    r15
     push    r14
@@ -658,7 +652,7 @@ unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> 
     : "intel", "volatile");
 
     // We will only be here if vmlaunch or vmresume failed.
-    Err(RvmError::DeviceError)
+    true
 }
 
 /// This is effectively the second-half of vmx_entry. When we return from a
@@ -666,7 +660,7 @@ unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> RvmResult<()> 
 /// stack and registers to the state they were in when vmx_entry was called.
 #[naked]
 #[inline(never)]
-unsafe extern "sysv64" fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
+unsafe extern "sysv64" fn vmx_exit() -> bool {
     llvm_asm!("
     // Store the guest registers not covered by the VMCS. At this point,
     // vmx_state is in RSP.
@@ -708,94 +702,7 @@ unsafe extern "sysv64" fn vmx_exit(_vmx_state: &mut VmxState) -> RvmResult<()> {
       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
     : "intel", "volatile");
 
-    Ok(())
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(C, packed)]
-pub struct InvEptDescriptor {
-    /// EPT pointer (EPTP)
-    eptp: u64,
-    reserved: u64,
-}
-
-#[derive(Debug)]
-#[repr(u64)]
-pub enum InvEptType {
-    /// The logical processor invalidates all mappings associated with bits
-    /// 51:12 of the EPT pointer (EPTP) specified in the INVEPT descriptor.
-    /// It may invalidate other mappings as well.
-    SingleContext = 1,
-
-    /// The logical processor invalidates mappings associated with all EPTPs.
-    Global = 2,
-}
-
-pub unsafe fn invept(invalidation: InvEptType, eptp: u64) -> Option<()> {
-    let err: bool;
-    let descriptor = InvEptDescriptor { eptp, reserved: 0 };
-    llvm_asm!("invept ($1), $2; setna $0" : "=r" (err) : "r" (&descriptor), "r" (invalidation) : "cc", "memory" : "volatile");
-
-    if err {
-        None
-    } else {
-        Some(())
-    }
-}
-
-struct VmInstructionError {
-    number: u32,
-}
-
-impl VmInstructionError {
-    fn explain(&self) -> &str {
-        match self.number {
-            0 => "OK",
-            1 => "VMCALL executed in VMX root operation",
-            2 => "VMCLEAR with invalid physical address",
-            3 => "VMCLEAR with VMXON pointer",
-            4 => "VMLAUNCH with non-clear VMCS",
-            5 => "VMRESUME with non-launched VMCS",
-            6 => "VMRESUME after VMXOFF (VMXOFF and VMXON between VMLAUNCH and VMRESUME)",
-            7 => "VM entry with invalid control field(s)",
-            8 => "VM entry with invalid host-state field(s)",
-            9 => "VMPTRLD with invalid physical address",
-            10 => "VMPTRLD with VMXON pointer",
-            11 => "VMPTRLD with incorrect VMCS revision identifier",
-            12 => "VMREAD/VMWRITE from/to unsupported VMCS component",
-            13 => "VMWRITE to read-only VMCS component",
-            15 => "VMXON executed in VMX root operation",
-            16 => "VM entry with invalid executive-VMCS pointer",
-            17 => "VM entry with non-launched executive VMCS",
-            18 => "VM entry with executive-VMCS pointer not VMXON pointer (when attempting to deactivate the dual-monitor treatment of SMIs and SMM)",
-            19 => "VMCALL with non-clear VMCS (when attempting to activate the dual-monitor treatment of SMIs and SMM)",
-            20 => "VMCALL with invalid VM-exit control fields",
-            22 => "VMCALL with incorrect MSEG revision identifier (when attempting to activate the dual-monitor treatment of SMIs and SMM)",
-            23 => "VMXOFF under dual-monitor treatment of SMIs and SMM",
-            24 => "VMCALL with invalid SMM-monitor features (when attempting to activate the dual-monitor treatment of SMIs and SMM)",
-            25 => "VM entry with invalid VM-execution control fields in executive VMCS (when attempting to return from SMM)",
-            26 => "VM entry with events blocked by MOV SS",
-            28 => "Invalid operand to INVEPT/INVVPID",
-            _ => "[INVALID]",
-        }
-    }
-}
-
-impl From<u32> for VmInstructionError {
-    fn from(x: u32) -> Self {
-        VmInstructionError { number: x }
-    }
-}
-
-impl Debug for VmInstructionError {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(
-            f,
-            "VmInstructionError({}, {:?})",
-            self.number,
-            self.explain()
-        )
-    }
+    false
 }
 
 /// Get TR base.

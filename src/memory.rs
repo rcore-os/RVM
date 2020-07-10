@@ -1,9 +1,8 @@
 use alloc::vec::Vec;
 use bitflags::bitflags;
 
-use crate::arch::EPageTable;
 use crate::ffi::alloc_frame;
-use crate::{RvmError, RvmResult};
+use crate::{ArchRvmPageTable, RvmError, RvmResult};
 
 pub const PAGE_SIZE: usize = 0x1000;
 
@@ -17,6 +16,12 @@ bitflags! {
         const READ      = 1 << 2;
         const WRITE     = 1 << 3;
         const EXECUTE   = 1 << 4;
+    }
+}
+
+impl Default for RvmPageTableFlags {
+    fn default() -> Self {
+        Self::READ | Self::WRITE | Self::EXECUTE
     }
 }
 
@@ -83,33 +88,41 @@ impl GuestPhysicalMemoryRegion {
     }
 
     /// Map all pages in the region to page table `pt` to 0 for delay map
-    fn map(&self, hpaddr: Option<HostPhysAddr>, pt: &mut EPageTable) {
+    fn map(&self, hpaddr: Option<HostPhysAddr>, pt: &mut impl RvmPageTable) {
         for offset in (0..self.end_paddr - self.start_paddr).step_by(PAGE_SIZE) {
             if let Some(hpaddr) = hpaddr {
-                pt.map(self.start_paddr + offset, hpaddr + offset);
+                pt.map(
+                    self.start_paddr + offset,
+                    hpaddr + offset,
+                    RvmPageTableFlags::default(),
+                )
+                .unwrap();
             } else {
-                let mut entry = pt.map(self.start_paddr + offset, 0);
-                entry.set_present(false);
-            };
+                pt.map(self.start_paddr + offset, 0, RvmPageTableFlags::empty())
+                    .unwrap();
+            }
         }
     }
 
     /// Unmap all pages in the region from page table `pt`
-    fn unmap(&self, _pt: &mut EPageTable) {
-        // TODO
+    fn unmap(&self, pt: &mut impl RvmPageTable) {
+        for offset in (0..self.end_paddr - self.start_paddr).step_by(PAGE_SIZE) {
+            pt.unmap(self.start_paddr + offset).ok();
+        }
     }
 
     /// Do real mapping when an EPT violation occurs
-    fn handle_page_fault(&self, pt: &mut EPageTable, guest_paddr: GuestPhysAddr) -> bool {
-        let mut entry = pt.get_entry(guest_paddr);
-        if entry.is_present() {
-            return false;
+    fn handle_page_fault(&self, pt: &mut impl RvmPageTable, guest_paddr: GuestPhysAddr) -> bool {
+        if let Ok(target) = pt.query(guest_paddr) {
+            if target != 0 {
+                return false;
+            }
         }
         let frame = alloc_frame().expect("failed to alloc frame");
-        entry.set_physical_address(frame);
-        entry.set_present(true);
+        pt.map(guest_paddr, frame, RvmPageTableFlags::default())
+            .unwrap();
+        // TODO: flush TLB?
         true
-        //TODO: flush TLB?
     }
 }
 
@@ -119,14 +132,15 @@ impl GuestPhysicalMemoryRegion {
 #[derive(Debug)]
 pub struct DefaultGuestPhysMemorySet {
     regions: Vec<GuestPhysicalMemoryRegion>,
-    rvm_page_table: EPageTable,
+    rvm_page_table: ArchRvmPageTable,
 }
 
 impl DefaultGuestPhysMemorySet {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             regions: Vec::new(),
-            rvm_page_table: EPageTable::new(),
+            rvm_page_table: ArchRvmPageTable::new(),
         }
     }
 
@@ -140,7 +154,7 @@ impl DefaultGuestPhysMemorySet {
 
     /// Clear and unmap all regions.
     fn clear(&mut self) {
-        info!("[RVM] clear {:#x?}", self);
+        debug!("[RVM] Guest memory set free {:#x?}", self);
         for region in self.regions.iter() {
             region.unmap(&mut self.rvm_page_table);
         }

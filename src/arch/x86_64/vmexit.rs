@@ -5,7 +5,7 @@ use bit_field::BitField;
 use core::convert::TryInto;
 use spin::RwLock;
 
-use super::exit_reason::ExitReason;
+use super::defines::ExitReason;
 use super::feature::*;
 use super::vcpu::{GuestState, InterruptState};
 use super::vmcs::{VmcsField16::*, VmcsField32::*, VmcsField64::*, VmcsFieldXX::*, *};
@@ -260,6 +260,7 @@ fn handle_cpuid(
             // should be interpreted as 0x40000001. Details are available in the
             // Linux kernel documentation (Documentation/virtual/kvm/cpuid.txt).
             guest_state.rax = X86_CPUID_KVM_FEATURES as u64;
+            #[allow(clippy::cast_ptr_alignment)]
             let vendor_id = unsafe { &*(VENDOR_STRING.as_ptr() as *const [u32; 3]) };
             guest_state.rbx = vendor_id[0] as u64;
             guest_state.rcx = vendor_id[1] as u64;
@@ -450,7 +451,7 @@ pub fn vmexit_handler(
     traps: &RwLock<TrapMap>,
 ) -> ExitResult {
     let exit_info = ExitInfo::from(vmcs);
-    trace!("[RVM] VM exit: {:#x?}", exit_info,);
+    trace!("[RVM] VM exit: {:#x?}", exit_info);
 
     let res = match exit_info.exit_reason {
         ExitReason::EXTERNAL_INTERRUPT => handle_external_interrupt(vmcs, interrupt_state),

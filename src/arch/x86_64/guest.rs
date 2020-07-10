@@ -3,7 +3,7 @@
 use alloc::sync::Arc;
 use spin::RwLock;
 
-use super::structs::VMM_STATE;
+use super::structs::VMM_GLOBAL_STATE;
 use crate::memory::{GuestPhysAddr, GuestPhysMemorySetTrait, HostPhysAddr};
 use crate::trap_map::{TrapKind, TrapMap};
 use crate::PAGE_SIZE;
@@ -19,7 +19,7 @@ pub struct Guest {
 impl Guest {
     /// Create a new Guest.
     pub fn new(gpm: impl GuestPhysMemorySetTrait + 'static) -> RvmResult<Arc<Self>> {
-        VMM_STATE.lock().alloc()?;
+        VMM_GLOBAL_STATE.lock().alloc()?;
         Ok(Arc::new(Self {
             gpm: Arc::new(RwLock::new(gpm)),
             traps: RwLock::new(TrapMap::default()),
@@ -37,6 +37,14 @@ impl Guest {
         size: usize,
         hpaddr: Option<HostPhysAddr>,
     ) -> RvmResult {
+        if gpaddr & (PAGE_SIZE - 1) != 0 || size & (PAGE_SIZE - 1) != 0 {
+            return Err(RvmError::InvalidParam);
+        }
+        if let Some(hpaddr) = hpaddr {
+            if hpaddr & (PAGE_SIZE - 1) != 0 {
+                return Err(RvmError::InvalidParam);
+            }
+        }
         self.gpm.write().add_map(gpaddr, size, hpaddr)
     }
 
@@ -63,7 +71,7 @@ impl Guest {
 
 impl Drop for Guest {
     fn drop(&mut self) {
-        info!("Guest free {:#x?}", self);
-        VMM_STATE.lock().free();
+        debug!("Guest free {:#x?}", self);
+        VMM_GLOBAL_STATE.lock().free();
     }
 }

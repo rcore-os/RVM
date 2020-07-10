@@ -3,8 +3,10 @@
 use bitflags::bitflags;
 use x86::bits64::vmx;
 
+use self::{VmcsField32::*, VmcsField64::*};
+use super::defines::{invept, InvEptType};
+use crate::memory::{HostPhysAddr, PAGE_SIZE};
 use crate::{RvmError, RvmResult};
-use VmcsField32::*;
 
 /// 16-Bit VMCS Fields.
 #[repr(u32)]
@@ -493,7 +495,7 @@ bitflags! {
 }
 
 impl InterruptionInfo {
-    fn has_error_code(vector: u8) -> bool {
+    pub fn has_error_code(vector: u8) -> bool {
         use super::consts as int_num;
         match vector {
             int_num::DoubleFault
@@ -507,7 +509,7 @@ impl InterruptionInfo {
         }
     }
 
-    fn from_vector(vector: u8) -> Self {
+    pub fn from_vector(vector: u8) -> Self {
         use super::consts as int_num;
         let mut info = unsafe { Self::from_bits_unchecked(vector as u32) } | Self::VALID;
         match vector {
@@ -523,6 +525,40 @@ impl InterruptionInfo {
             info |= Self::ERROR_CODE;
         }
         info
+    }
+}
+
+bitflags! {
+    /// This field provides details about the event to be injected.
+    pub struct EPTPointer: u64 {
+        /// EPT paging-structure memory type Uncacheable (UC)
+        #[allow(clippy::identity_op)]
+        const MEMORY_TYPE_UC = 0 << 0;
+        /// EPT paging-structure memory type Write-back (WB)
+        #[allow(clippy::identity_op)]
+        const MEMORY_TYPE_WB = 6 << 0;
+        /// EPT page-walk length 1
+        const WALK_LENGTH_1 = 0 << 3;
+        /// EPT page-walk length 2
+        const WALK_LENGTH_2 = 1 << 3;
+        /// EPT page-walk length 3
+        const WALK_LENGTH_3 = 2 << 3;
+        /// EPT page-walk length 4
+        const WALK_LENGTH_4 = 3 << 3;
+        /// Setting this control to 1 enables accessed and dirty flags for EPT
+        const ENABLE_ACCESSED_DIRTY = 1 << 6;
+    }
+}
+
+impl EPTPointer {
+    pub fn from_table_phys(pml4_addr: HostPhysAddr) -> Self {
+        let aligned_addr = pml4_addr & !(PAGE_SIZE - 1);
+        unsafe {
+            Self::from_bits_unchecked(aligned_addr as u64)
+                | Self::MEMORY_TYPE_WB
+                | Self::WALK_LENGTH_4
+                | Self::ENABLE_ACCESSED_DIRTY
+        }
     }
 }
 
@@ -564,6 +600,16 @@ impl AutoVmcs {
             self.write32(VM_ENTRY_EXCEPTION_ERROR_CODE, 0);
         }
         self.write32(VM_ENTRY_INTR_INFO, info.bits());
+    }
+
+    pub fn set_ept_pointer(&mut self, pml4_addr: HostPhysAddr) {
+        let eptp = EPTPointer::from_table_phys(pml4_addr).bits();
+        self.write64(EPT_POINTER, eptp);
+
+        // From Volume 3, Section 28.3.3.4: Software can use an INVEPT with type all
+        // ALL_CONTEXT to prevent undesired retention of cached EPT information. Here,
+        // we only care about invalidating information associated with this EPTP.
+        unsafe { invept(InvEptType::SingleContext, eptp) };
     }
 
     pub fn read16(&self, field: VmcsField16) -> u16 {
