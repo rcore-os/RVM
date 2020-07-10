@@ -1,5 +1,6 @@
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use bitflags::bitflags;
+use spin::Mutex;
 
 use crate::ffi::alloc_frame;
 use crate::{ArchRvmPageTable, RvmError, RvmResult};
@@ -49,18 +50,18 @@ pub trait RvmPageTable {
     fn table_phys(&self) -> HostPhysAddr;
 }
 
-pub trait GuestPhysMemorySetTrait: core::fmt::Debug {
+pub trait GuestPhysMemorySetTrait: core::fmt::Debug + Send + Sync {
     /// Add a contiguous guest physical memory region and create mapping,
     /// with the target host physical address `hpaddr` (optional).
     fn add_map(
-        &mut self,
+        &self,
         gpaddr: GuestPhysAddr,
         size: usize,
         hpaddr: Option<HostPhysAddr>,
     ) -> RvmResult;
 
     /// Called when accessed a non-mapped guest physical adderss `gpaddr`.
-    fn handle_page_fault(&mut self, gpaddr: GuestPhysAddr) -> RvmResult;
+    fn handle_page_fault(&self, gpaddr: GuestPhysAddr) -> RvmResult;
 
     /// Page table base address.
     fn table_phys(&self) -> HostPhysAddr;
@@ -88,7 +89,8 @@ impl GuestPhysicalMemoryRegion {
     }
 
     /// Map all pages in the region to page table `pt` to 0 for delay map
-    fn map(&self, hpaddr: Option<HostPhysAddr>, pt: &mut impl RvmPageTable) {
+    fn map(&self, hpaddr: Option<HostPhysAddr>, pt: &Mutex<impl RvmPageTable>) {
+        let mut pt = pt.lock();
         for offset in (0..self.end_paddr - self.start_paddr).step_by(PAGE_SIZE) {
             if let Some(hpaddr) = hpaddr {
                 pt.map(
@@ -105,14 +107,16 @@ impl GuestPhysicalMemoryRegion {
     }
 
     /// Unmap all pages in the region from page table `pt`
-    fn unmap(&self, pt: &mut impl RvmPageTable) {
+    fn unmap(&self, pt: &Mutex<impl RvmPageTable>) {
+        let mut pt = pt.lock();
         for offset in (0..self.end_paddr - self.start_paddr).step_by(PAGE_SIZE) {
             pt.unmap(self.start_paddr + offset).ok();
         }
     }
 
     /// Do real mapping when an EPT violation occurs
-    fn handle_page_fault(&self, pt: &mut impl RvmPageTable, guest_paddr: GuestPhysAddr) -> bool {
+    fn handle_page_fault(&self, pt: &Mutex<impl RvmPageTable>, guest_paddr: GuestPhysAddr) -> bool {
+        let mut pt = pt.lock();
         if let Ok(target) = pt.query(guest_paddr) {
             if target != 0 {
                 return false;
@@ -131,40 +135,45 @@ impl GuestPhysicalMemoryRegion {
 /// violation in Intel VMX).
 #[derive(Debug)]
 pub struct DefaultGuestPhysMemorySet {
-    regions: Vec<GuestPhysicalMemoryRegion>,
-    rvm_page_table: ArchRvmPageTable,
+    regions: Mutex<Vec<GuestPhysicalMemoryRegion>>,
+    rvm_page_table: Mutex<ArchRvmPageTable>,
+    table_phys: HostPhysAddr,
 }
 
 impl DefaultGuestPhysMemorySet {
     #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {
-            regions: Vec::new(),
-            rvm_page_table: ArchRvmPageTable::new(),
-        }
+    pub fn new() -> Arc<Self> {
+        let pt = ArchRvmPageTable::new();
+        Arc::new(Self {
+            regions: Mutex::new(Vec::new()),
+            table_phys: pt.table_phys(),
+            rvm_page_table: Mutex::new(pt),
+        })
     }
 
     /// Test if [`start_paddr`, `end_paddr`) is a free region.
     fn test_free_region(&self, start_paddr: GuestPhysAddr, end_paddr: GuestPhysAddr) -> bool {
         self.regions
+            .lock()
             .iter()
             .find(|region| region.is_overlap_with(start_paddr, end_paddr))
             .is_none()
     }
 
     /// Clear and unmap all regions.
-    fn clear(&mut self) {
+    fn clear(&self) {
         debug!("[RVM] Guest memory set free {:#x?}", self);
-        for region in self.regions.iter() {
-            region.unmap(&mut self.rvm_page_table);
+        let mut regions = self.regions.lock();
+        for region in regions.iter() {
+            region.unmap(&self.rvm_page_table);
         }
-        self.regions.clear();
+        regions.clear();
     }
 }
 
 impl GuestPhysMemorySetTrait for DefaultGuestPhysMemorySet {
     fn add_map(
-        &mut self,
+        &self,
         gpaddr: GuestPhysAddr,
         size: usize,
         hpaddr: Option<HostPhysAddr>,
@@ -183,23 +192,28 @@ impl GuestPhysMemorySetTrait for DefaultGuestPhysMemorySet {
             start_paddr,
             end_paddr,
         };
-        region.map(hpaddr, &mut self.rvm_page_table);
+        region.map(hpaddr, &self.rvm_page_table);
         // keep order by start address
-        let idx = self
-            .regions
+        let mut regions = self.regions.lock();
+        let idx = regions
             .iter()
             .enumerate()
             .find(|(_, other)| start_paddr < other.start_paddr)
             .map(|(i, _)| i)
-            .unwrap_or(self.regions.len());
-        self.regions.insert(idx, region);
+            .unwrap_or_else(|| regions.len());
+        regions.insert(idx, region);
         Ok(())
     }
 
-    fn handle_page_fault(&mut self, gpaddr: GuestPhysAddr) -> RvmResult {
+    fn handle_page_fault(&self, gpaddr: GuestPhysAddr) -> RvmResult {
         debug!("[RVM] handle RVM page fault @ {:#x}", gpaddr);
-        if let Some(region) = self.regions.iter().find(|region| region.contains(gpaddr)) {
-            region.handle_page_fault(&mut self.rvm_page_table, gpaddr);
+        if let Some(region) = self
+            .regions
+            .lock()
+            .iter()
+            .find(|region| region.contains(gpaddr))
+        {
+            region.handle_page_fault(&self.rvm_page_table, gpaddr);
             Ok(())
         } else {
             Err(RvmError::NotFound)
@@ -207,7 +221,7 @@ impl GuestPhysMemorySetTrait for DefaultGuestPhysMemorySet {
     }
 
     fn table_phys(&self) -> HostPhysAddr {
-        self.rvm_page_table.table_phys()
+        self.table_phys
     }
 }
 

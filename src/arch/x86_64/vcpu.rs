@@ -593,7 +593,7 @@ impl Drop for Vcpu {
 #[inline(never)]
 unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> bool {
     llvm_asm!("
-    // Store host callee save registers to stack, return address, and processor flags.
+    // Store host callee save registers, return address, and processor flags to stack.
     pushf
     push    r15
     push    r14
