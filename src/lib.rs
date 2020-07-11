@@ -24,6 +24,7 @@ mod trap_map;
 pub use arch::*;
 pub use memory::*;
 pub use rvm_macros::*;
+pub use trap_map::TrapKind;
 
 pub type RvmResult<T = ()> = Result<T, RvmError>;
 

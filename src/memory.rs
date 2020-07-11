@@ -60,6 +60,9 @@ pub trait GuestPhysMemorySetTrait: core::fmt::Debug + Send + Sync {
         hpaddr: Option<HostPhysAddr>,
     ) -> RvmResult;
 
+    /// Remove a guest physical memory region, destroy the mapping.
+    fn remove_map(&self, gpaddr: GuestPhysAddr, size: usize) -> RvmResult;
+
     /// Called when accessed a non-mapped guest physical adderss `gpaddr`.
     fn handle_page_fault(&self, gpaddr: GuestPhysAddr) -> RvmResult;
 
@@ -79,7 +82,7 @@ impl GuestPhysicalMemoryRegion {
         self.start_paddr <= guest_paddr && guest_paddr < self.end_paddr
     }
 
-    /// Test whether this region is (page) overlap with region [`start_addr`, `end_addr`)
+    /// Test whether this region is (page) overlap with region [`start_paddr`, `end_paddr`)
     fn is_overlap_with(&self, start_paddr: GuestPhysAddr, end_paddr: GuestPhysAddr) -> bool {
         let p0 = self.start_paddr / PAGE_SIZE;
         let p1 = (self.end_paddr - 1) / PAGE_SIZE + 1;
@@ -201,6 +204,37 @@ impl GuestPhysMemorySetTrait for DefaultGuestPhysMemorySet {
             .map(|(i, _)| i)
             .unwrap_or_else(|| regions.len());
         regions.insert(idx, region);
+        Ok(())
+    }
+
+    fn remove_map(&self, gpaddr: GuestPhysAddr, size: usize) -> RvmResult {
+        let start_paddr = gpaddr & !(PAGE_SIZE - 1);
+        let end_paddr = (start_paddr + size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+        if start_paddr >= end_paddr {
+            warn!("[RVM] invalid guest physical memory region");
+            return Err(RvmError::InvalidParam);
+        }
+
+        if let Some((idx, region)) =
+            self.regions.lock().iter().enumerate().find(|(_, region)| {
+                region.start_paddr == start_paddr && region.end_paddr == end_paddr
+            })
+        {
+            region.unmap(&self.rvm_page_table);
+            self.regions.lock().remove(idx);
+            return Ok(());
+        }
+
+        if !self.test_free_region(start_paddr, end_paddr) {
+            warn!("[RVM] partially unmap physical memory region is not supported");
+            return Err(RvmError::NotSupported);
+        }
+
+        GuestPhysicalMemoryRegion {
+            start_paddr,
+            end_paddr,
+        }
+        .unmap(&self.rvm_page_table);
         Ok(())
     }
 

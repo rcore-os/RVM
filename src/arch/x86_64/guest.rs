@@ -56,17 +56,19 @@ impl Guest {
             return Err(RvmError::OutOfRange);
         }
         match kind {
-            TrapKind::Io => {
+            TrapKind::GuestTrapBell => Err(RvmError::NotSupported),
+            TrapKind::GuestTrapIo => {
                 if addr + size > u16::MAX as usize {
                     Err(RvmError::OutOfRange)
                 } else {
                     self.traps.lock().push(kind, addr, size, key)
                 }
             }
-            TrapKind::Mmio => {
+            TrapKind::GuestTrapMem => {
                 if addr & (PAGE_SIZE - 1) != 0 || size & (PAGE_SIZE - 1) != 0 {
                     Err(RvmError::InvalidParam)
                 } else {
+                    self.gpm.remove_map(addr, size)?;
                     self.traps.lock().push(kind, addr, size, key)
                 }
             }

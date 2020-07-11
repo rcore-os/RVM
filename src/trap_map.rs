@@ -9,9 +9,14 @@ use crate::{RvmError, RvmResult};
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
 pub enum TrapKind {
-    Unknown,
-    Mmio = 1,
-    Io = 2,
+    /// Asynchronous trap with MMIO.
+    GuestTrapBell = 0,
+    /// Synchronous traps with MMIO.
+    GuestTrapMem = 1,
+    /// Synchronous traps with I/O instructions.
+    GuestTrapIo = 2,
+    /// Invalid
+    _Invalid,
 }
 
 impl TryFrom<u32> for TrapKind {
@@ -19,8 +24,9 @@ impl TryFrom<u32> for TrapKind {
 
     fn try_from(value: u32) -> RvmResult<Self> {
         match value {
-            1 => Ok(TrapKind::Mmio),
-            2 => Ok(TrapKind::Io),
+            0 => Ok(TrapKind::GuestTrapBell),
+            1 => Ok(TrapKind::GuestTrapMem),
+            2 => Ok(TrapKind::GuestTrapIo),
             _ => Err(RvmError::InvalidParam),
         }
     }
@@ -51,8 +57,8 @@ impl TrapMap {
     pub fn find(&self, kind: TrapKind, addr: usize) -> Option<Trap> {
         let traps = match kind {
             #[cfg(target_arch = "x86_64")]
-            TrapKind::Io => &self.io_traps,
-            TrapKind::Mmio => &self.mem_traps,
+            TrapKind::GuestTrapIo => &self.io_traps,
+            TrapKind::GuestTrapMem | TrapKind::GuestTrapBell => &self.mem_traps,
             _ => return None,
         };
         if let Some((_, trap)) = traps.range(..=addr).last() {
@@ -63,11 +69,11 @@ impl TrapMap {
         None
     }
 
-    pub fn push(&mut self, kind: TrapKind, addr: usize, size: usize, key: u64) -> RvmResult<()> {
+    pub fn push(&mut self, kind: TrapKind, addr: usize, size: usize, key: u64) -> RvmResult {
         let traps = match kind {
             #[cfg(target_arch = "x86_64")]
-            TrapKind::Io => &mut self.io_traps,
-            TrapKind::Mmio => &mut self.mem_traps,
+            TrapKind::GuestTrapIo => &mut self.io_traps,
+            TrapKind::GuestTrapMem | TrapKind::GuestTrapBell => &mut self.mem_traps,
             _ => return Err(RvmError::InvalidParam),
         };
         let trap = Trap {

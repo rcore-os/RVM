@@ -356,7 +356,10 @@ fn handle_io_instruction(
         _ => {}
     }
 
-    let trap = match traps.lock().find(TrapKind::Io, io_info.port as usize) {
+    let trap = match traps
+        .lock()
+        .find(TrapKind::GuestTrapIo, io_info.port as usize)
+    {
         Some(t) => t,
         None => {
             warn!("[RVM] VM exit: Unhandled IO port {:#x}", io_info.port);
@@ -394,12 +397,13 @@ fn handle_mmio(
     guest_paddr: usize,
     traps: &Mutex<TrapMap>,
 ) -> ExitResult {
-    let trap = match traps.lock().find(TrapKind::Mmio, guest_paddr) {
+    let trap = match traps.lock().find(TrapKind::GuestTrapMem, guest_paddr) {
         Some(t) => t,
         None => return Ok(None),
     };
 
     exit_info.next_rip(vmcs);
+    // TODO
     warn!(
         "[RVM] VM exit: Handling MMIO access {:#x} with {:#x?}",
         guest_paddr, trap
