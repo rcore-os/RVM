@@ -141,7 +141,6 @@ pub struct DefaultGuestPhysMemorySet {
 }
 
 impl DefaultGuestPhysMemorySet {
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Arc<Self> {
         let pt = ArchRvmPageTable::new();
         Arc::new(Self {

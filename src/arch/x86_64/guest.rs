@@ -12,8 +12,8 @@ use crate::{RvmError, RvmResult};
 /// Represents a guest within the hypervisor.
 #[derive(Debug)]
 pub struct Guest {
-    pub gpm: Arc<dyn GuestPhysMemorySetTrait>,
-    pub traps: Mutex<TrapMap>,
+    pub(super) gpm: Arc<dyn GuestPhysMemorySetTrait>,
+    pub(super) traps: Mutex<TrapMap>,
 }
 
 impl Guest {
@@ -49,10 +49,16 @@ impl Guest {
     }
 
     pub fn set_trap(&self, kind: TrapKind, addr: usize, size: usize, key: u64) -> RvmResult {
+        if size == 0 {
+            return Err(RvmError::InvalidParam);
+        }
+        if addr > usize::MAX - size {
+            return Err(RvmError::OutOfRange);
+        }
         match kind {
             TrapKind::Io => {
                 if addr + size > u16::MAX as usize {
-                    Err(RvmError::InvalidParam)
+                    Err(RvmError::OutOfRange)
                 } else {
                     self.traps.lock().push(kind, addr, size, key)
                 }

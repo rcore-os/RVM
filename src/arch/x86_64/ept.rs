@@ -33,6 +33,7 @@ impl EPageTable {
         created_intrm: bool,
     ) -> RvmResult<&mut EPTEntry> {
         let mut page_table = self.ept_page_root;
+        let guest_paddr = guest_paddr & !(PAGE_SIZE - 1);
         for level in 0..4 {
             let index = (guest_paddr >> (12 + (3 - level) * 9)) & 0o777;
             let entry = EPTEntry::from(page_table + index * 8);
@@ -183,7 +184,7 @@ impl EPTEntry {
 
     #[inline]
     pub fn set_entry(&mut self, hpaddr: HostPhysAddr, flags: EPTFlags, mem_type: EPTMemoryType) {
-        debug_assert_eq!(hpaddr & (PAGE_SIZE - 1), 0);
+        let hpaddr = hpaddr & !(PAGE_SIZE - 1);
         self.entry = hpaddr as u64 | flags.bits();
         self.entry.set_bits(3..6, mem_type as u64);
     }

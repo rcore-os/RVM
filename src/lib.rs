@@ -34,9 +34,6 @@ pub enum RvmError {
     NoMemory,
     InvalidParam,
     OutOfRange,
+    BadState,
     NotFound,
-
-    // Deprecated
-    NoDeviceSpace,
-    DeviceError,
 }

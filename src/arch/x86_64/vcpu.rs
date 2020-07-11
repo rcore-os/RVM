@@ -211,7 +211,7 @@ impl Vcpu {
 
     pub fn init(&mut self, entry: u64) -> RvmResult {
         unsafe {
-            vmx::vmclear(self.vmcs_page.phys_addr()).map_err(|_| RvmError::DeviceError)?;
+            vmx::vmclear(self.vmcs_page.phys_addr()).map_err(|_| RvmError::Internal)?;
             let mut vmcs = AutoVmcs::new(self.vmcs_page.phys_addr())?;
             self.setup_msr_list();
             self.init_vmcs_host(&mut vmcs)?;

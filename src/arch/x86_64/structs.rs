@@ -24,7 +24,7 @@ impl VmxPage {
             unsafe { core::ptr::write_bytes(page.vaddr() as *mut u8, fill, PAGE_SIZE) };
             Ok(page)
         } else {
-            Err(RvmError::NoDeviceSpace)
+            Err(RvmError::NoMemory)
         }
     }
 
@@ -200,7 +200,7 @@ impl VmmGlobalState {
             msr::IA32_VMX_CR0_FIXED0,
             msr::IA32_VMX_CR0_FIXED1,
         ) {
-            return Err(RvmError::DeviceError);
+            return Err(RvmError::BadState);
         }
         let cr4 = Cr4::read() | Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS;
         if !cr_is_valid(
@@ -208,7 +208,7 @@ impl VmmGlobalState {
             msr::IA32_VMX_CR4_FIXED0,
             msr::IA32_VMX_CR4_FIXED1,
         ) {
-            return Err(RvmError::DeviceError);
+            return Err(RvmError::BadState);
         }
 
         // Setup VMXON page.
@@ -221,7 +221,7 @@ impl VmmGlobalState {
             // Execute VMXON.
             if vmx::vmxon(page.phys_addr()).is_err() {
                 warn!("[RVM] failed to turn on VMX on CPU {}", cpu_num);
-                return Err(RvmError::DeviceError);
+                return Err(RvmError::Internal);
             }
             info!("[RVM] successed to turn on VMX on CPU {}", cpu_num);
         }

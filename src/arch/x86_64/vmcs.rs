@@ -573,7 +573,7 @@ impl AutoVmcs {
         x86_64::instructions::interrupts::disable();
         unsafe {
             if vmx::vmptrld(phys_addr).is_err() {
-                Err(RvmError::DeviceError)
+                Err(RvmError::Internal)
             } else {
                 Ok(Self {
                     vmcs_paddr: phys_addr,

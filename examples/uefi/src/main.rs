@@ -56,7 +56,7 @@ fn run_hypervisor() -> RvmResult {
         }
     }
 
-    vcpu.write_state(&vcpu::GuestState {
+    vcpu.write_state(&GuestState {
         xcr0: 0,
         cr2: 0,
         rax: 1,

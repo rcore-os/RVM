@@ -5,22 +5,22 @@ use bit_set::BitSet;
 /// The virtual interrupt controller to track pending interrupts
 #[derive(Debug)]
 pub struct InterruptController {
-    num: usize,
+    max_num: usize,
     bitset: BitSet,
 }
 
 impl InterruptController {
-    pub fn new(num: usize) -> Self {
+    pub fn new(max_num: usize) -> Self {
         Self {
-            num,
-            bitset: BitSet::with_capacity(num),
+            max_num,
+            bitset: BitSet::with_capacity(max_num + 1),
         }
     }
 
     // In some architecture need to reverse the interrupt priority.
     #[inline(always)]
     fn vector(&self, vec: usize) -> usize {
-        self.num - vec
+        self.max_num - vec
     }
 
     /// Try to pop an interrupt with the given vector.
