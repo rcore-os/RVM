@@ -5,7 +5,7 @@ use bitflags::bitflags;
 use core::{convert::TryFrom, fmt};
 use numeric_enum_macro::numeric_enum;
 
-use crate::memory::{GuestPhysAddr, HostPhysAddr, RvmPageTable, RvmPageTableFlags, PAGE_SIZE};
+use crate::memory::{GuestPhysAddr, HostPhysAddr, IntoRvmPageTableFlags, RvmPageTable, PAGE_SIZE};
 use crate::{ffi::*, RvmError, RvmResult};
 
 /// The number of entries in a page table.
@@ -103,7 +103,7 @@ impl RvmPageTable for EPageTable {
         &mut self,
         gpaddr: GuestPhysAddr,
         hpaddr: HostPhysAddr,
-        flags: RvmPageTableFlags,
+        flags: impl IntoRvmPageTableFlags,
     ) -> RvmResult {
         trace!(
             "[RVM] EPT map: {:#x?} -> {:#x?}, flags={:?} in {:#x?}",
@@ -112,8 +112,11 @@ impl RvmPageTable for EPageTable {
             flags,
             self.ept_page_root
         );
-        self.get_entry(gpaddr, true)?
-            .set_entry(hpaddr, flags.into(), EPTMemoryType::WriteBack);
+        self.get_entry(gpaddr, true)?.set_entry(
+            hpaddr,
+            EPTFlags::from(flags),
+            EPTMemoryType::WriteBack,
+        );
         Ok(())
     }
 
@@ -124,9 +127,13 @@ impl RvmPageTable for EPageTable {
     }
 
     /// Change the `flags` of the guest physical frame `gpaddr`.
-    fn protect(&mut self, gpaddr: GuestPhysAddr, flags: RvmPageTableFlags) -> RvmResult {
+    fn protect(&mut self, gpaddr: GuestPhysAddr, flags: impl IntoRvmPageTableFlags) -> RvmResult {
         let entry = self.get_entry(gpaddr, false)?;
-        entry.set_entry(entry.addr(), flags.into(), EPTMemoryType::WriteBack);
+        entry.set_entry(
+            entry.addr(),
+            EPTFlags::from(flags),
+            EPTMemoryType::WriteBack,
+        );
         Ok(())
     }
 
@@ -219,16 +226,16 @@ bitflags! {
     }
 }
 
-impl From<RvmPageTableFlags> for EPTFlags {
-    fn from(flags: RvmPageTableFlags) -> Self {
+impl EPTFlags {
+    fn from(flags: impl IntoRvmPageTableFlags) -> Self {
         let mut f = Self::empty();
-        if flags.contains(RvmPageTableFlags::READ) {
+        if flags.is_read() {
             f |= Self::READ;
         }
-        if flags.contains(RvmPageTableFlags::WRITE) {
+        if flags.is_write() {
             f |= Self::WRITE;
         }
-        if flags.contains(RvmPageTableFlags::EXECUTE) {
+        if flags.is_execute() {
             f |= Self::EXECUTE;
         }
         f
