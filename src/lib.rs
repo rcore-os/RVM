@@ -30,7 +30,7 @@ pub use trap_map::TrapKind;
 
 pub type RvmResult<T = ()> = Result<T, RvmError>;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum RvmError {
     Internal,
     NotSupported,

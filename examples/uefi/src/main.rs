@@ -37,7 +37,7 @@ fn run_hypervisor() -> RvmResult {
     let entry = 0x1000;
     let gpm = DefaultGuestPhysMemorySet::new();
     let guest = Guest::new(gpm)?;
-    let mut vcpu = Vcpu::new(1, entry as u64, guest.clone())?;
+    let mut vcpu = Vcpu::new(entry as u64, guest.clone())?;
 
     for i in 0..0x10 {
         let guest_paddr = i * 0x1000;

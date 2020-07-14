@@ -38,6 +38,9 @@ pub trait RvmPageTable {
 }
 
 pub trait GuestPhysMemorySetTrait: core::fmt::Debug + Send + Sync {
+    /// Physical address space size.
+    fn size(&self) -> u64;
+
     /// Add a contiguous guest physical memory region and create mapping,
     /// with the target host physical address `hpaddr` (optional).
     fn add_map(

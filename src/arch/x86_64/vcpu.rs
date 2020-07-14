@@ -14,6 +14,8 @@ use crate::interrupt::InterruptController;
 use crate::{packet::RvmExitPacket, RvmError, RvmResult};
 use alloc::{boxed::Box, sync::Arc};
 use bit_field::BitField;
+use core::fmt;
+use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
 use x86::{bits64::vmx, msr};
 use x86_64::{
@@ -121,7 +123,7 @@ impl InterruptState {
     }
 
     /// Injects an interrupt into the guest, if there is one pending.
-    fn try_inject_interrupt(&mut self, vmcs: &mut AutoVmcs) -> RvmResult<()> {
+    fn try_inject_interrupt(&mut self, vmcs: &mut AutoVmcs) -> RvmResult {
         use super::consts::*;
         // Since hardware generated exceptions are delivered to the guest directly, the only exceptions
         // we see here are those we generate in the VMM, e.g. GP faults in vmexit handlers. Therefore
@@ -173,12 +175,11 @@ impl InterruptState {
 }
 
 /// Represents a virtual CPU within a guest.
-#[derive(Debug)]
 pub struct Vcpu {
     vpid: u16,
     guest: Arc<Guest>,
     running: AtomicBool,
-    vmx_state: VmxState,
+    vmx_state: Pin<Box<VmxState>>,
     vmcs_page: VmxPage,
     host_msr_list: MsrList,
     guest_msr_list: MsrList,
@@ -186,30 +187,38 @@ pub struct Vcpu {
 }
 
 impl Vcpu {
-    pub fn new(vpid: u16, entry: u64, guest: Arc<Guest>) -> RvmResult<Box<Self>> {
+    pub fn new(entry: u64, guest: Arc<Guest>) -> RvmResult<Self> {
         // TODO pin thread
-        assert_ne!(vpid, 0);
+
+        if entry > guest.gpm.size() {
+            return Err(RvmError::InvalidParam);
+        }
+
+        let mut allocator = guest.vpid_allocator();
+        let vpid = allocator.alloc()?;
+
         let vmx_basic = VmxBasic::read();
         let host_msr_list = MsrList::new()?;
         let guest_msr_list = MsrList::new()?;
         let mut vmcs_page = VmxPage::alloc(0)?;
         vmcs_page.set_revision_id(vmx_basic.revision_id);
 
-        let mut vcpu = Box::new(Self {
+        let mut vcpu = Self {
             vpid,
-            guest,
+            guest: guest.clone(),
             running: AtomicBool::new(false),
-            vmx_state: VmxState::default(),
+            vmx_state: Box::pin(VmxState::default()),
             vmcs_page,
             host_msr_list,
             guest_msr_list,
             interrupt_state: InterruptState::new(),
-        });
+        };
         vcpu.init(entry)?;
+        allocator.all_done();
         Ok(vcpu)
     }
 
-    pub fn init(&mut self, entry: u64) -> RvmResult {
+    fn init(&mut self, entry: u64) -> RvmResult {
         unsafe {
             vmx::vmclear(self.vmcs_page.phys_addr()).map_err(|_| RvmError::Internal)?;
             let mut vmcs = AutoVmcs::new(self.vmcs_page.phys_addr())?;
@@ -241,7 +250,7 @@ impl Vcpu {
     }
 
     /// Setup VMCS host state.
-    unsafe fn init_vmcs_host(&self, vmcs: &mut AutoVmcs) -> RvmResult<()> {
+    unsafe fn init_vmcs_host(&self, vmcs: &mut AutoVmcs) -> RvmResult {
         vmcs.write64(HOST_IA32_PAT, Msr::new(msr::IA32_PAT).read());
         vmcs.write64(HOST_IA32_EFER, Msr::new(msr::IA32_EFER).read());
 
@@ -273,13 +282,16 @@ impl Vcpu {
         vmcs.writeXX(HOST_IA32_SYSENTER_EIP, 0);
         vmcs.write32(HOST_IA32_SYSENTER_CS, 0);
 
-        vmcs.writeXX(HOST_RSP, &self.vmx_state as *const _ as usize);
+        vmcs.writeXX(
+            HOST_RSP,
+            self.vmx_state.as_ref().get_ref() as *const _ as usize,
+        );
         vmcs.writeXX(HOST_RIP, vmx_exit as usize);
         Ok(())
     }
 
     /// Setup VMCS guest state.
-    unsafe fn init_vmcs_guest(&self, vmcs: &mut AutoVmcs, entry: u64) -> RvmResult<()> {
+    unsafe fn init_vmcs_guest(&self, vmcs: &mut AutoVmcs, entry: u64) -> RvmResult {
         vmcs.write64(GUEST_IA32_PAT, Msr::new(msr::IA32_PAT).read());
         let mut efer = Efer::read();
         efer.remove(EferFlags::LONG_MODE_ENABLE | EferFlags::LONG_MODE_ACTIVE);
@@ -379,7 +391,7 @@ impl Vcpu {
     }
 
     /// Setup VMCS control fields.
-    unsafe fn init_vmcs_control(&self, vmcs: &mut AutoVmcs) -> RvmResult<()> {
+    unsafe fn init_vmcs_control(&self, vmcs: &mut AutoVmcs) -> RvmResult {
         use CpuBasedVmExecControls as CpuCtrl;
         use PinBasedVmExecControls as PinCtrl;
         use SecondaryCpuBasedVmExecControls as CpuCtrl2;
@@ -563,7 +575,7 @@ impl Vcpu {
         }
     }
 
-    pub fn write_state(&mut self, guest_state: &GuestState) -> RvmResult<()> {
+    pub fn write_state(&mut self, guest_state: &GuestState) -> RvmResult {
         self.vmx_state.guest_state = guest_state.clone();
         Ok(())
     }
@@ -573,7 +585,7 @@ impl Vcpu {
     }
 
     /// Inject a virtual interrupt.
-    pub fn virtual_interrupt(&mut self, vector: u32) -> RvmResult<()> {
+    pub fn virtual_interrupt(&mut self, vector: u32) -> RvmResult {
         self.interrupt_state
             .controller
             .virtual_interrupt(vector as usize);
@@ -581,10 +593,26 @@ impl Vcpu {
     }
 }
 
+impl fmt::Debug for Vcpu {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut f = f.debug_struct("Vcpu");
+        f.field("vpid", &self.vpid)
+            .field("guest", &(self.guest.as_ref() as *const _ as usize))
+            .field("running", &self.running)
+            .field("vmx_state", &self.vmx_state)
+            .field("vmcs_page", &self.vmcs_page)
+            .field("host_msr_list", &self.host_msr_list)
+            .field("guest_msr_list", &self.guest_msr_list)
+            .field("interrupt_state", &self.interrupt_state)
+            .finish()
+    }
+}
+
 impl Drop for Vcpu {
     fn drop(&mut self) {
         debug!("Vcpu free {:#x?}", self);
         // TODO pin thread
+        self.guest.vpid_allocator().free(self.vpid).unwrap();
         unsafe { vmx::vmclear(self.vmcs_page.phys_addr()).unwrap() };
     }
 }

@@ -146,6 +146,10 @@ impl DefaultGuestPhysMemorySet {
 }
 
 impl GuestPhysMemorySetTrait for DefaultGuestPhysMemorySet {
+    fn size(&self) -> u64 {
+        1 << 32
+    }
+
     fn add_map(
         &self,
         gpaddr: GuestPhysAddr,
