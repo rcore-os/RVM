@@ -19,6 +19,7 @@ pub struct IoPacket {
     pub input: bool,
     pub string: bool,
     pub repeat: bool,
+    pub data: [u8; 4],
 }
 
 #[cfg(target_arch = "x86_64")]

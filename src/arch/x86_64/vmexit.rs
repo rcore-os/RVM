@@ -347,7 +347,7 @@ fn handle_io_instruction(
     traps: &Mutex<TrapMap>,
 ) -> ExitResult {
     let io_info = IoInfo::from(exit_info.exit_qualification);
-    info!(
+    trace!(
         "[RVM] VM exit: IO instruction @ RIP({:#x}): {} {:#x?}, repeat = {}, string = {}",
         exit_info.guest_rip,
         if io_info.input { "IN" } else { "OUT" },
@@ -388,10 +388,26 @@ fn handle_io_instruction(
         }
     };
 
-    info!(
-        "[RVM] VM exit: Handling IO port {:#x} with {:#x?}, rax value: {:#x}",
-        io_info.port, trap, guest_state.rax as u8
+    trace!(
+        "[RVM] VM exit: Found trap {:#x?} with IO port {:#x}, RAX value: {:#x}",
+        trap,
+        io_info.port,
+        guest_state.rax as u8
     );
+
+    let mut data = [0; 4];
+    if io_info.input {
+        // From Volume 1, Section 3.4.1.1: 32-bit operands generate a 32-bit
+        // result, zero-extended to a 64-bit result in the destination general-
+        // purpose register.
+        if io_info.access_size == 4 {
+            guest_state.rax = 0;
+        }
+    } else {
+        let ptr = &guest_state.rax as *const _ as *const u8;
+        let len = io_info.access_size as usize;
+        unsafe { data[..len].copy_from_slice(core::slice::from_raw_parts(ptr, len)) };
+    }
 
     Ok(Some(RvmExitPacket::new_io_packet(
         trap.key,
@@ -401,6 +417,7 @@ fn handle_io_instruction(
             input: io_info.input,
             string: io_info.string,
             repeat: io_info.repeat,
+            data,
         },
     )))
 }
@@ -452,7 +469,7 @@ fn handle_mmio(
             // FIXME: read via guest vaddr
             gpm.read_memory(
                 exit_info.guest_rip,
-                &mut packet.inst_buf[0..packet.inst_len as usize],
+                &mut packet.inst_buf[..packet.inst_len as usize],
             )?;
             Ok(Some(RvmExitPacket::new_mmio_packet(trap.key, packet)))
         }
