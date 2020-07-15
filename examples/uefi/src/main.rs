@@ -4,7 +4,6 @@
 #![feature(vec_leak)]
 #![feature(abi_efiapi)]
 #![feature(llvm_asm)]
-#![feature(naked_functions)]
 
 extern crate alloc;
 #[macro_use]
@@ -20,9 +19,8 @@ use x86_64::{
     PhysAddr,
 };
 
-#[naked]
 unsafe extern "C" fn hypercall() {
-    for i in 0.. {
+    for i in 0..100 {
         llvm_asm!(
             "vmcall"
             :
@@ -34,6 +32,7 @@ unsafe extern "C" fn hypercall() {
             : "rax"
             : "volatile");
     }
+    asm!("hlt");
 }
 
 fn setup() -> RvmResult<(Arc<Guest>, Vcpu)> {
@@ -76,13 +75,12 @@ fn setup() -> RvmResult<(Arc<Guest>, Vcpu)> {
 
 fn run_hypervisor() -> RvmResult {
     let (_guest, mut vcpu) = setup()?;
-    vcpu.write_state(&GuestState {
-        xcr0: 0,
-        cr2: 0,
+    vcpu.write_state(&VcpuState {
         rax: 1,
         rbx: 2,
         rcx: 3,
         rdx: 4,
+        rsp: 0x8000,
         rbp: 5,
         rsi: 6,
         rdi: 7,
@@ -94,12 +92,10 @@ fn run_hypervisor() -> RvmResult {
         r13: 13,
         r14: 14,
         r15: 15,
+        rflags: 0,
     })?;
-
-    vcpu.resume()?;
-
+    info!("{:?}", vcpu.resume());
     info!("{:#x?}", vcpu.read_state()?);
-
     Ok(())
 }
 

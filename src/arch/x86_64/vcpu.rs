@@ -11,7 +11,7 @@ use super::{
     Guest,
 };
 use crate::interrupt::InterruptController;
-use crate::{packet::RvmExitPacket, RvmError, RvmResult};
+use crate::{packet::RvmExitPacket, RvmError, RvmResult, VcpuIo, VcpuState};
 use alloc::{boxed::Box, sync::Arc};
 use bit_field::BitField;
 use core::fmt;
@@ -21,9 +21,22 @@ use x86::{bits64::vmx, msr};
 use x86_64::{
     registers::control::{Cr0, Cr0Flags, Cr4, Cr4Flags},
     registers::model_specific::{Efer, EferFlags},
+    registers::rflags::RFlags,
 };
 
 const BASE_PROCESSOR_VPID: u16 = 1;
+const X86_FLAGS_RESERVED_ONES: usize = 1 << 1;
+const X86_FLAGS_USER: u64 = RFlags::CARRY_FLAG.bits()
+    | RFlags::PARITY_FLAG.bits()
+    | RFlags::AUXILIARY_CARRY_FLAG.bits()
+    | RFlags::ZERO_FLAG.bits()
+    | RFlags::SIGN_FLAG.bits()
+    | RFlags::TRAP_FLAG.bits()
+    | RFlags::DIRECTION_FLAG.bits()
+    | RFlags::OVERFLOW_FLAG.bits()
+    | RFlags::NESTED_TASK.bits()
+    | RFlags::ALIGNMENT_CHECK.bits()
+    | RFlags::ID.bits();
 
 /// Holds the register state used to restore a host.
 #[repr(C)]
@@ -70,6 +83,26 @@ pub struct GuestState {
     pub r15: u64,
 }
 
+macro_rules! copy_state {
+    ($to: expr, $from: expr) => {{
+        $to.rax = $from.rax;
+        $to.rcx = $from.rcx;
+        $to.rdx = $from.rdx;
+        $to.rbx = $from.rbx;
+        $to.rbp = $from.rbp;
+        $to.rsi = $from.rsi;
+        $to.rdi = $from.rdi;
+        $to.r8 = $from.r8;
+        $to.r9 = $from.r9;
+        $to.r10 = $from.r10;
+        $to.r11 = $from.r11;
+        $to.r12 = $from.r12;
+        $to.r13 = $from.r13;
+        $to.r14 = $from.r14;
+        $to.r15 = $from.r15;
+    }};
+}
+
 impl GuestState {
     pub fn dump(&self, vmcs: &AutoVmcs) -> alloc::string::String {
         format!(
@@ -83,7 +116,7 @@ impl GuestState {
             {:#x?}",
             vmcs.readXX(GUEST_RIP),
             vmcs.readXX(GUEST_RSP),
-            vmcs.readXX(GUEST_RFLAGS),
+            RFlags::from_bits_truncate(vmcs.readXX(GUEST_RFLAGS) as u64),
             Cr0Flags::from_bits_truncate(vmcs.readXX(GUEST_CR0) as u64),
             vmcs.readXX(GUEST_CR3),
             Cr4Flags::from_bits_truncate(vmcs.readXX(GUEST_CR4) as u64),
@@ -420,7 +453,7 @@ impl Vcpu {
 
         vmcs.writeXX(GUEST_RSP, 0);
         // Set all reserved RFLAGS bits to their correct values
-        vmcs.writeXX(GUEST_RFLAGS, 0x2);
+        vmcs.writeXX(GUEST_RFLAGS, X86_FLAGS_RESERVED_ONES);
 
         vmcs.write32(GUEST_INTERRUPTIBILITY_STATE, 0);
         vmcs.write32(GUEST_ACTIVITY_STATE, 0);
@@ -632,13 +665,35 @@ impl Vcpu {
         }
     }
 
-    pub fn write_state(&mut self, guest_state: &GuestState) -> RvmResult {
-        self.vmx_state.guest_state = guest_state.clone();
+    pub fn read_state(&self) -> RvmResult<VcpuState> {
+        let mut state = VcpuState::default();
+        copy_state!(state, self.vmx_state.guest_state);
+        let vmcs = AutoVmcs::new(self.vmcs_page.phys_addr())?;
+        state.rsp = vmcs.readXX(GUEST_RSP) as u64;
+        state.rflags = vmcs.readXX(GUEST_RFLAGS) as u64 & X86_FLAGS_USER;
+        Ok(state)
+    }
+
+    pub fn write_state(&mut self, state: &VcpuState) -> RvmResult {
+        copy_state!(self.vmx_state.guest_state, state);
+        let mut vmcs = AutoVmcs::new(self.vmcs_page.phys_addr())?;
+        vmcs.writeXX(GUEST_RSP, state.rsp as usize);
+        if state.rflags & X86_FLAGS_RESERVED_ONES as u64 != 0 {
+            let old_rflags = vmcs.readXX(GUEST_RFLAGS) as u64;
+            let new_rflags = (old_rflags & !X86_FLAGS_USER) | (state.rflags & X86_FLAGS_USER);
+            vmcs.writeXX(GUEST_RFLAGS, new_rflags as usize);
+        }
         Ok(())
     }
 
-    pub fn read_state(&self) -> RvmResult<GuestState> {
-        Ok(self.vmx_state.guest_state.clone())
+    pub fn write_io_state(&mut self, state: &VcpuIo) -> RvmResult {
+        if state.access_size != 1 && state.access_size != 2 && state.access_size != 4 {
+            return Err(RvmError::InvalidParam);
+        }
+        let ptr = &self.vmx_state.guest_state.rax as *const _ as *mut u8;
+        let len = state.access_size as usize;
+        unsafe { core::slice::from_raw_parts_mut(ptr, len).copy_from_slice(&state.data[..len]) };
+        Ok(())
     }
 
     /// Inject a virtual interrupt.
