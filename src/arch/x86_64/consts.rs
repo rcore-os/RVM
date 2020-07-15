@@ -1,5 +1,7 @@
 #![allow(dead_code, non_upper_case_globals)]
 
+pub const X86_MAX_INST_LEN: usize = 15;
+
 pub const DivideError: u8 = 0;
 pub const Debug: u8 = 1;
 pub const NonMaskableInterrupt: u8 = 2;

@@ -4,11 +4,15 @@ use alloc::sync::Arc;
 use bit_field::BitField;
 use core::convert::TryInto;
 use spin::Mutex;
+use x86_64::registers::model_specific::EferFlags;
 
-use super::defines::ExitReason;
 use super::feature::*;
+use super::structs::ExitReason;
 use super::vcpu::{GuestState, InterruptState};
-use super::vmcs::{VmcsField16::*, VmcsField32::*, VmcsField64::*, VmcsFieldXX::*, *};
+use super::vmcs::{
+    AutoVmcs, GuestRegisterAccessRights, VmcsField16::*, VmcsField32::*, VmcsField64::*,
+    VmcsFieldXX::*,
+};
 use crate::memory::GuestPhysMemorySetTrait;
 use crate::packet::*;
 use crate::trap_map::{TrapKind, TrapMap};
@@ -74,6 +78,23 @@ impl ExitInterruptionInfo {
 }
 
 #[derive(Debug)]
+struct EptViolationInfo {
+    read: bool,
+    write: bool,
+    instruction: bool,
+}
+
+impl EptViolationInfo {
+    fn from(qualification: usize) -> Self {
+        Self {
+            read: qualification.get_bit(0),
+            write: qualification.get_bit(1),
+            instruction: qualification.get_bit(2),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct IoInfo {
     access_size: u8,
     input: bool,
@@ -99,7 +120,7 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
     trace!("[RVM] VM exit: External interrupt {:#x?}", info);
     debug_assert!(info.valid);
     debug_assert!(info.interruption_type == 0);
-    manual_trap(info.vector as usize);
+    // manual_trap(info.vector as usize);
 
     use super::consts as int_num;
     match info.vector - int_num::IRQ0 {
@@ -113,7 +134,7 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
     Ok(None)
 }
 
-fn manual_trap(_vector: usize) {
+fn _manual_trap(_vector: usize) {
     todo!();
 }
 
@@ -395,20 +416,48 @@ fn handle_mmio(
     exit_info: &ExitInfo,
     vmcs: &mut AutoVmcs,
     guest_paddr: usize,
+    gpm: &Arc<dyn GuestPhysMemorySetTrait>,
     traps: &Mutex<TrapMap>,
 ) -> ExitResult {
+    if exit_info.exit_instruction_length as usize > super::consts::X86_MAX_INST_LEN {
+        return Err(RvmError::Internal);
+    }
+
     let trap = match traps.lock().find(TrapKind::GuestTrapMem, guest_paddr) {
         Some(t) => t,
         None => return Ok(None),
     };
 
     exit_info.next_rip(vmcs);
-    // TODO
-    warn!(
-        "[RVM] VM exit: Handling MMIO access {:#x} with {:#x?}",
-        guest_paddr, trap
-    );
-    Ok(None)
+    match trap.kind {
+        TrapKind::GuestTrapBell => Err(RvmError::NotSupported),
+        TrapKind::GuestTrapMem => {
+            let efer = EferFlags::from_bits_truncate(vmcs.read64(GUEST_IA32_EFER));
+            let cs_rights =
+                GuestRegisterAccessRights::from_bits_truncate(vmcs.read32(GUEST_CS_AR_BYTES));
+            let default_operand_size = if (efer.contains(EferFlags::LONG_MODE_ACTIVE)
+                && cs_rights.contains(GuestRegisterAccessRights::LONG_MODE))
+                || cs_rights.contains(GuestRegisterAccessRights::DB)
+            {
+                4 // IA32-e 64 bit mode, or CS.D set (and not 64 bit mode).
+            } else {
+                2 // CS.D clear (and not 64 bit mode).
+            };
+            let mut packet = MmioPacket {
+                addr: guest_paddr as u64,
+                inst_len: exit_info.exit_instruction_length as u8,
+                default_operand_size,
+                ..Default::default()
+            };
+            // FIXME: read via guest vaddr
+            gpm.read_memory(
+                exit_info.guest_rip,
+                &mut packet.inst_buf[0..packet.inst_len as usize],
+            )?;
+            Ok(Some(RvmExitPacket::new_mmio_packet(trap.key, packet)))
+        }
+        _ => Err(RvmError::BadState),
+    }
 }
 
 fn handle_ept_violation(
@@ -417,6 +466,7 @@ fn handle_ept_violation(
     gpm: &Arc<dyn GuestPhysMemorySetTrait>,
     traps: &Mutex<TrapMap>,
 ) -> ExitResult {
+    let _info = EptViolationInfo::from(exit_info.exit_qualification);
     let guest_paddr = vmcs.read64(GUEST_PHYSICAL_ADDRESS) as usize;
     trace!(
         "[RVM] VM exit: EPT violation @ {:#x} RIP({:#x})",
@@ -424,7 +474,7 @@ fn handle_ept_violation(
         exit_info.guest_rip
     );
 
-    if let Some(packet) = handle_mmio(exit_info, vmcs, guest_paddr, traps)? {
+    if let Some(packet) = handle_mmio(exit_info, vmcs, guest_paddr, gpm, traps)? {
         return Ok(Some(packet));
     }
 
@@ -471,10 +521,15 @@ pub fn vmexit_handler(
 
     if res.is_err() {
         warn!(
-            "[RVM] VM exit handler for reason {:?} returned {:?}\n{}",
+            "[RVM] VM exit handler for reason {:?} returned {:?}\n{}\nInstruction: {:x?}",
             exit_info.exit_reason,
             res,
             guest_state.dump(&vmcs),
+            gpm.read_memory_as_vec(
+                vmcs.readXX(GUEST_CS_BASE) + exit_info.guest_rip,
+                exit_info.exit_instruction_length as usize
+            )
+            .expect("[RVM] read guest memory failed"),
         );
     }
     res

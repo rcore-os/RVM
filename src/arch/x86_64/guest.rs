@@ -4,8 +4,9 @@ use alloc::sync::Arc;
 use bitmap_allocator::{BitAlloc, BitAlloc256};
 use core::fmt;
 use spin::Mutex;
+use x86::msr::*;
 
-use super::structs::VMM_GLOBAL_STATE;
+use super::structs::{MsrBitmaps, VMM_GLOBAL_STATE};
 use crate::memory::{GuestPhysAddr, GuestPhysMemorySetTrait, HostPhysAddr};
 use crate::trap_map::{TrapKind, TrapMap};
 use crate::PAGE_SIZE;
@@ -34,7 +35,7 @@ impl<'a> VpidAllocator<'a> {
         Ok(())
     }
 
-    pub fn all_done(&mut self) {
+    pub fn done(&mut self) {
         self.free_on_drop = false;
     }
 }
@@ -51,6 +52,7 @@ impl<'a> Drop for VpidAllocator<'a> {
 pub struct Guest {
     pub(super) gpm: Arc<dyn GuestPhysMemorySetTrait>,
     pub(super) traps: Mutex<TrapMap>,
+    pub(super) msr_bitmaps: MsrBitmaps,
     vpid_allocator: Mutex<BitAlloc256>,
 }
 
@@ -58,11 +60,31 @@ impl Guest {
     /// Create a new Guest.
     pub fn new(gpm: Arc<dyn GuestPhysMemorySetTrait>) -> RvmResult<Arc<Self>> {
         VMM_GLOBAL_STATE.lock().alloc()?;
+
+        let mut msr_bitmaps = MsrBitmaps::new()?;
+        unsafe {
+            msr_bitmaps.ignore(IA32_PAT, true);
+            msr_bitmaps.ignore(IA32_EFER, true);
+            msr_bitmaps.ignore(IA32_FS_BASE, true);
+            msr_bitmaps.ignore(IA32_GS_BASE, true);
+            msr_bitmaps.ignore(IA32_KERNEL_GSBASE, true);
+            msr_bitmaps.ignore(IA32_STAR, true);
+            msr_bitmaps.ignore(IA32_LSTAR, true);
+            msr_bitmaps.ignore(IA32_FMASK, true);
+            msr_bitmaps.ignore(IA32_TSC_ADJUST, true);
+            msr_bitmaps.ignore(IA32_TSC_AUX, true);
+            msr_bitmaps.ignore(IA32_SYSENTER_CS, true);
+            msr_bitmaps.ignore(IA32_SYSENTER_ESP, true);
+            msr_bitmaps.ignore(IA32_SYSENTER_EIP, true);
+        }
+
         let mut allocator = BitAlloc256::DEFAULT;
         allocator.insert(1..64);
+
         Ok(Arc::new(Self {
             gpm,
             traps: Mutex::new(TrapMap::default()),
+            msr_bitmaps,
             vpid_allocator: Mutex::new(allocator),
         }))
     }
@@ -219,7 +241,7 @@ mod tests {
             {
                 let mut allocator = guest.vpid_allocator();
                 assert_eq!(allocator.alloc()?, 1);
-                allocator.all_done();
+                allocator.done();
             }
             {
                 let mut allocator = guest.vpid_allocator();
@@ -237,14 +259,14 @@ mod tests {
             let mut allocator = guest.vpid_allocator();
             assert_eq!(allocator.alloc()?, expected);
             Err(RvmError::Internal)?;
-            allocator.all_done();
+            allocator.done();
             Ok(())
         };
         let g = |expected| -> RvmResult {
             let mut allocator = guest.vpid_allocator();
             assert_eq!(allocator.alloc()?, expected);
             Ok(())?;
-            allocator.all_done();
+            allocator.done();
             Ok(())
         };
         assert_eq!(f(1).err(), Some(RvmError::Internal));

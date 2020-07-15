@@ -25,6 +25,7 @@ mod trap_map;
 pub use arch::{check_hypervisor_feature, ArchRvmPageTable, Guest, GuestState, Vcpu};
 pub use dummy::DefaultGuestPhysMemorySet;
 pub use memory::*;
+pub use packet::*;
 pub use rvm_macros::*;
 pub use trap_map::TrapKind;
 

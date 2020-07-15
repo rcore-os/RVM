@@ -216,6 +216,10 @@ impl GuestPhysMemorySetTrait for DefaultGuestPhysMemorySet {
         Ok(())
     }
 
+    fn query(&self, gpaddr: GuestPhysAddr) -> RvmResult<HostPhysAddr> {
+        self.rvm_page_table.lock().query(gpaddr)
+    }
+
     fn handle_page_fault(&self, gpaddr: GuestPhysAddr) -> RvmResult {
         debug!("[RVM] handle RVM page fault @ {:#x}", gpaddr);
         if let Some(region) = self

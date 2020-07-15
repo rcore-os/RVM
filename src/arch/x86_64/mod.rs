@@ -1,13 +1,13 @@
 use raw_cpuid::CpuId;
 
 mod consts;
-mod defines;
 mod ept;
 mod feature;
 mod guest;
 mod msr;
 mod structs;
 mod timer;
+mod utils;
 mod vcpu;
 mod vmcs;
 mod vmexit;

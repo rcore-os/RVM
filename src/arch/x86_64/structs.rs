@@ -1,12 +1,15 @@
-//! Some global structs used for VMX.
+//! Some structures used for VMX.
 
 use alloc::vec::Vec;
+use core::fmt::{Debug, Formatter, Result};
 use lazy_static::lazy_static;
+use numeric_enum_macro::numeric_enum;
 use spin::Mutex;
-use x86::{bits64::vmx, msr};
+use x86::bits64::vmx;
 use x86_64::registers::control::{Cr0, Cr4, Cr4Flags};
 
 use super::msr::*;
+use super::utils::{cr0_is_valid, cr4_is_valid};
 use crate::ffi::{alloc_frame, dealloc_frame, phys_to_virt};
 use crate::{RvmError, RvmResult, PAGE_SIZE};
 
@@ -108,6 +111,42 @@ impl MsrList {
     }
 }
 
+#[derive(Debug)]
+pub struct MsrBitmaps {
+    page: VmxPage,
+}
+
+impl MsrBitmaps {
+    pub fn new() -> RvmResult<Self> {
+        Ok(Self {
+            page: VmxPage::alloc(u8::MAX)?,
+        })
+    }
+
+    pub fn paddr(&self) -> u64 {
+        self.page.paddr as u64
+    }
+
+    pub unsafe fn ignore(&mut self, msr: u32, ignore_writes: bool) {
+        // From Volume 3, Section 24.6.9.
+        let mut ptr = self.page.as_ptr::<u8>();
+        if msr >= 0xc000_0000 {
+            ptr = ptr.add(1 << 10);
+        }
+        let msr_low = msr & 0x1fff;
+        let msr_byte = (msr_low / 8) as usize;
+        let msr_bit = (msr_low % 8) as u8;
+
+        // Ignore reads to the MSR.
+        core::slice::from_raw_parts_mut(ptr, 1024)[msr_byte] &= !(1 << msr_bit);
+
+        if ignore_writes {
+            // Ignore writes to the MSR.
+            core::slice::from_raw_parts_mut(ptr.add(2 << 10), 1024)[msr_byte] &= !(1 << msr_bit);
+        }
+    }
+}
+
 /// Global VMX states used for all guests.
 #[derive(Default)]
 pub struct VmmGlobalState {
@@ -120,7 +159,11 @@ lazy_static! {
 }
 
 impl VmmGlobalState {
-    pub fn alloc(&mut self) -> RvmResult<()> {
+    pub fn alloc(&mut self) -> RvmResult {
+        if !super::check_hypervisor_feature() {
+            return Err(RvmError::NotSupported);
+        }
+
         if self.num_guests == 0 {
             // TODO: support multiple cpu
             let num_cpus = 1;
@@ -153,7 +196,7 @@ impl VmmGlobalState {
         }
     }
 
-    fn vmxon_task(&mut self, cpu_num: usize) -> RvmResult<()> {
+    fn vmxon_task(&mut self, cpu_num: usize) -> RvmResult {
         let page = &mut self.vmxon_pages[cpu_num];
         let vmx_basic = VmxBasic::read();
 
@@ -195,19 +238,11 @@ impl VmmGlobalState {
 
         // Check control registers are in a VMX-friendly state.
         let cr0 = Cr0::read();
-        if !cr_is_valid(
-            cr0.bits(),
-            msr::IA32_VMX_CR0_FIXED0,
-            msr::IA32_VMX_CR0_FIXED1,
-        ) {
+        if !cr0_is_valid(cr0.bits()) {
             return Err(RvmError::BadState);
         }
         let cr4 = Cr4::read() | Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS;
-        if !cr_is_valid(
-            cr4.bits(),
-            msr::IA32_VMX_CR4_FIXED0,
-            msr::IA32_VMX_CR4_FIXED1,
-        ) {
+        if !cr4_is_valid(cr4.bits()) {
             return Err(RvmError::BadState);
         }
 
@@ -242,9 +277,131 @@ impl VmmGlobalState {
     }
 }
 
-/// Check whether the CR0/CR0 has required fixed bits.
-fn cr_is_valid(cr_value: u64, fixed0_msr: u32, fixed1_msr: u32) -> bool {
-    let fixed0 = unsafe { Msr::new(fixed0_msr).read() };
-    let fixed1 = unsafe { Msr::new(fixed1_msr).read() };
-    ((cr_value & fixed1) | fixed0) == cr_value
+numeric_enum! {
+    #[repr(u32)]
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    #[allow(non_camel_case_types)]
+    pub enum ExitReason {
+        EXCEPTION_OR_NMI = 0,
+        EXTERNAL_INTERRUPT = 1,
+        TRIPLE_FAULT = 2,
+        INIT_SIGNAL = 3,
+        STARTUP_IPI = 4,
+        IO_SMI = 5,
+        OTHER_SMI = 6,
+        INTERRUPT_WINDOW = 7,
+        NMI_WINDOW = 8,
+        TASK_SWITCH = 9,
+        CPUID = 10,
+        GETSEC = 11,
+        HLT = 12,
+        INVD = 13,
+        INVLPG = 14,
+        RDPMC = 15,
+        RDTSC = 16,
+        RSM = 17,
+        VMCALL = 18,
+        VMCLEAR = 19,
+        VMLAUNCH = 20,
+        VMPTRLD = 21,
+        VMPTRST = 22,
+        VMREAD = 23,
+        VMRESUME = 24,
+        VMWRITE = 25,
+        VMXOFF = 26,
+        VMXON = 27,
+        CONTROL_REGISTER_ACCESS = 28,
+        MOV_DR = 29,
+        IO_INSTRUCTION = 30,
+        RDMSR = 31,
+        WRMSR = 32,
+        ENTRY_FAILURE_GUEST_STATE = 33,
+        ENTRY_FAILURE_MSR_LOADING = 34,
+        MWAIT = 36,
+        MONITOR_TRAP_FLAG = 37,
+        MONITOR = 39,
+        PAUSE = 40,
+        ENTRY_FAILURE_MACHINE_CHECK = 41,
+        TPR_BELOW_THRESHOLD = 43,
+        APIC_ACCESS = 44,
+        VIRTUALIZED_EOI = 45,
+        ACCESS_GDTR_OR_IDTR = 46,
+        ACCESS_LDTR_OR_TR = 47,
+        EPT_VIOLATION = 48,
+        EPT_MISCONFIGURATION = 49,
+        INVEPT = 50,
+        RDTSCP = 51,
+        VMX_PREEMPT_TIMER_EXPIRED = 52,
+        INVVPID = 53,
+        WBINVD = 54,
+        XSETBV = 55,
+        APIC_WRITE = 56,
+        RDRAND = 57,
+        INVPCID = 58,
+        VMFUNC = 59,
+        ENCLS = 60,
+        RDSEED = 61,
+        PAGE_MODIFICATION_LOG_FULL = 62,
+        XSAVES = 63,
+        XRSTORS = 64,
+        SPP_EVENT = 66,
+        UMWAIT = 67,
+        TPAUSE = 68,
+    }
+}
+
+pub struct VmInstructionError {
+    number: u32,
+}
+
+impl VmInstructionError {
+    fn explain(&self) -> &str {
+        match self.number {
+            0 => "OK",
+            1 => "VMCALL executed in VMX root operation",
+            2 => "VMCLEAR with invalid physical address",
+            3 => "VMCLEAR with VMXON pointer",
+            4 => "VMLAUNCH with non-clear VMCS",
+            5 => "VMRESUME with non-launched VMCS",
+            6 => "VMRESUME after VMXOFF (VMXOFF and VMXON between VMLAUNCH and VMRESUME)",
+            7 => "VM entry with invalid control field(s)",
+            8 => "VM entry with invalid host-state field(s)",
+            9 => "VMPTRLD with invalid physical address",
+            10 => "VMPTRLD with VMXON pointer",
+            11 => "VMPTRLD with incorrect VMCS revision identifier",
+            12 => "VMREAD/VMWRITE from/to unsupported VMCS component",
+            13 => "VMWRITE to read-only VMCS component",
+            15 => "VMXON executed in VMX root operation",
+            16 => "VM entry with invalid executive-VMCS pointer",
+            17 => "VM entry with non-launched executive VMCS",
+            18 => "VM entry with executive-VMCS pointer not VMXON pointer (when attempting to deactivate the dual-monitor treatment of SMIs and SMM)",
+            19 => "VMCALL with non-clear VMCS (when attempting to activate the dual-monitor treatment of SMIs and SMM)",
+            20 => "VMCALL with invalid VM-exit control fields",
+            22 => "VMCALL with incorrect MSEG revision identifier (when attempting to activate the dual-monitor treatment of SMIs and SMM)",
+            23 => "VMXOFF under dual-monitor treatment of SMIs and SMM",
+            24 => "VMCALL with invalid SMM-monitor features (when attempting to activate the dual-monitor treatment of SMIs and SMM)",
+            25 => "VM entry with invalid VM-execution control fields in executive VMCS (when attempting to return from SMM)",
+            26 => "VM entry with events blocked by MOV SS",
+            28 => "Invalid operand to INVEPT/INVVPID",
+            _ => "[INVALID]",
+        }
+    }
+}
+
+impl From<u32> for VmInstructionError {
+    fn from(x: u32) -> Self {
+        VmInstructionError { number: x }
+    }
+}
+
+impl Debug for VmInstructionError {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        write!(
+            f,
+            "VmInstructionError({}, {:?})",
+            self.number,
+            self.explain()
+        )
+    }
 }

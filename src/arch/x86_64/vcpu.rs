@@ -1,10 +1,10 @@
 //! The virtual CPU within a guest.
 
 use super::{
-    defines::VmInstructionError,
     msr::*,
-    structs::{MsrList, VmxPage},
+    structs::{MsrList, VmInstructionError, VmxPage},
     timer::PitTimer,
+    utils::{cr0_is_valid, cr4_is_valid},
     vmcs::*,
     vmcs::{VmcsField16::*, VmcsField32::*, VmcsField64::*, VmcsFieldXX::*},
     vmexit::vmexit_handler,
@@ -22,6 +22,8 @@ use x86_64::{
     registers::control::{Cr0, Cr0Flags, Cr4, Cr4Flags},
     registers::model_specific::{Efer, EferFlags},
 };
+
+const BASE_PROCESSOR_VPID: u16 = 1;
 
 /// Holds the register state used to restore a host.
 #[repr(C)]
@@ -202,6 +204,7 @@ impl Vcpu {
         let guest_msr_list = MsrList::new()?;
         let mut vmcs_page = VmxPage::alloc(0)?;
         vmcs_page.set_revision_id(vmx_basic.revision_id);
+        allocator.done();
 
         let mut vcpu = Self {
             vpid,
@@ -214,7 +217,6 @@ impl Vcpu {
             interrupt_state: InterruptState::new(),
         };
         vcpu.init(entry)?;
-        allocator.all_done();
         Ok(vcpu)
     }
 
@@ -292,33 +294,83 @@ impl Vcpu {
 
     /// Setup VMCS guest state.
     unsafe fn init_vmcs_guest(&self, vmcs: &mut AutoVmcs, entry: u64) -> RvmResult {
+        // Setup PAT & EFER
         vmcs.write64(GUEST_IA32_PAT, Msr::new(msr::IA32_PAT).read());
         let mut efer = Efer::read();
-        efer.remove(EferFlags::LONG_MODE_ENABLE | EferFlags::LONG_MODE_ACTIVE);
+        if self.vpid != BASE_PROCESSOR_VPID {
+            // Disable LME and LMA on all but the BSP.
+            efer.remove(EferFlags::LONG_MODE_ENABLE | EferFlags::LONG_MODE_ACTIVE);
+        }
         vmcs.write64(GUEST_IA32_EFER, efer.bits());
 
+        // Setup CR0
         vmcs.writeXX(GUEST_CR3, 0);
-        let cr0 = Cr0Flags::NUMERIC_ERROR.bits() as usize;
-        vmcs.writeXX(GUEST_CR0, cr0);
+        let mut cr0 = Cr0Flags::NUMERIC_ERROR;
+        if self.vpid == BASE_PROCESSOR_VPID {
+            // Enable protected mode and paging on the BSP.
+            cr0 |= Cr0Flags::PAGING | Cr0Flags::PROTECTED_MODE_ENABLE;
+        }
+        // From Volume 3, Section 26.3.1.1: PE and PG bits of CR0 are not checked when unrestricted
+        // guest is enabled. Set both here to avoid clashing with X86_MSR_IA32_VMX_CR0_FIXED1.
+        let mut cr0_check = cr0;
+        use SecondaryCpuBasedVmExecControls as CpuCtrl2;
+        if CpuCtrl2::from_bits_truncate(vmcs.read32(SECONDARY_VM_EXEC_CONTROL))
+            .contains(CpuCtrl2::UNRESTRICTED_GUEST)
+        {
+            cr0_check |= Cr0Flags::PAGING | Cr0Flags::PROTECTED_MODE_ENABLE;
+        }
+        if !cr0_is_valid(cr0_check.bits()) {
+            return Err(RvmError::BadState);
+        }
+        vmcs.writeXX(GUEST_CR0, cr0.bits() as usize);
         // Ensure that CR0.NE remains set by masking and manually handling writes to CR0 that unset it.
-        vmcs.writeXX(CR0_GUEST_HOST_MASK, cr0);
-        vmcs.writeXX(CR0_READ_SHADOW, cr0);
-        let cr4 = Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS.bits() as usize;
-        vmcs.writeXX(GUEST_CR4, cr4);
+        vmcs.writeXX(
+            CR0_GUEST_HOST_MASK,
+            (Cr0Flags::NUMERIC_ERROR | Cr0Flags::NOT_WRITE_THROUGH | Cr0Flags::CACHE_DISABLE).bits()
+                as usize,
+        );
+        vmcs.writeXX(CR0_READ_SHADOW, Cr0Flags::CACHE_DISABLE.bits() as usize); // TODO: ET bit
+
+        // Setup CR4
+        // Enable the PAE bit on the BSP for 64-bit paging.
+        let mut cr4 = Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS;
+        if self.vpid == BASE_PROCESSOR_VPID {
+            // Enable the PAE bit on the BSP for 64-bit paging.
+            cr4 |= Cr4Flags::PHYSICAL_ADDRESS_EXTENSION;
+        }
+        if !cr4_is_valid(cr4.bits()) {
+            return Err(RvmError::BadState);
+        }
+        vmcs.writeXX(GUEST_CR4, cr4.bits() as usize);
         // For now, the guest can own all of the CR4 bits except VMXE, which it shouldn't touch.
-        vmcs.writeXX(CR4_GUEST_HOST_MASK, cr4);
+        vmcs.writeXX(
+            CR4_GUEST_HOST_MASK,
+            Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS.bits() as usize,
+        );
         vmcs.writeXX(CR4_READ_SHADOW, 0);
 
         let default_rights = GuestRegisterAccessRights::default().bits();
-        let cs_rights = default_rights | GuestRegisterAccessRights::EXECUTABLE.bits();
+        let mut cs_rights = default_rights | GuestRegisterAccessRights::EXECUTABLE.bits();
+        if self.vpid == BASE_PROCESSOR_VPID {
+            // Ensure that the BSP starts with a 64-bit code segment.
+            cs_rights |= GuestRegisterAccessRights::LONG_MODE.bits();
+        }
 
         // Setup CS and entry point.
         vmcs.write32(GUEST_CS_LIMIT, 0xffff);
         vmcs.write32(GUEST_CS_AR_BYTES, cs_rights);
         if entry > 0 {
-            vmcs.write16(GUEST_CS_SELECTOR, 0);
-            vmcs.writeXX(GUEST_CS_BASE, 0);
-            vmcs.writeXX(GUEST_RIP, entry as usize);
+            if self.vpid == BASE_PROCESSOR_VPID {
+                // Use GUEST_RIP to set the entry point on the BSP.
+                vmcs.write16(GUEST_CS_SELECTOR, 0);
+                vmcs.writeXX(GUEST_CS_BASE, 0);
+                vmcs.writeXX(GUEST_RIP, entry as usize);
+            } else {
+                // Use CS to set the entry point on APs.
+                vmcs.write16(GUEST_CS_SELECTOR, (entry >> 4) as u16);
+                vmcs.writeXX(GUEST_CS_BASE, entry as usize);
+                vmcs.writeXX(GUEST_RIP, 0);
+            }
         } else {
             // Reference: Volume 3, Section 9.1.4, First Instruction Executed.
             vmcs.write16(GUEST_CS_SELECTOR, 0xf000);
@@ -469,11 +521,16 @@ impl Vcpu {
         )?;
 
         // Setup VM-entry VMCS controls.
+        let mut ctls = VmEntryControls::LOAD_IA32_PAT | VmEntryControls::LOAD_IA32_EFER;
+        if self.vpid == BASE_PROCESSOR_VPID {
+            // On the BSP, go straight to IA32E mode on entry.
+            ctls |= VmEntryControls::IA32E_MODE;
+        }
         vmcs.set_control(
             VM_ENTRY_CONTROLS,
             Msr::new(msr::IA32_VMX_TRUE_ENTRY_CTLS).read(),
             Msr::new(msr::IA32_VMX_ENTRY_CTLS).read(),
-            (VmEntryControls::LOAD_IA32_PAT | VmEntryControls::LOAD_IA32_EFER).bits(),
+            ctls.bits(),
             0,
         )?;
 
@@ -526,7 +583,7 @@ impl Vcpu {
         vmcs.set_ept_pointer(self.guest.rvm_page_table_phys());
 
         // Setup MSR handling.
-        vmcs.write64(MSR_BITMAP, 0); // TODO: msr_bitmap_addr
+        vmcs.write64(MSR_BITMAP, self.guest.msr_bitmaps.paddr());
 
         vmcs.write64(VM_EXIT_MSR_LOAD_ADDR, self.host_msr_list.paddr());
         vmcs.write32(VM_EXIT_MSR_LOAD_COUNT, self.host_msr_list.count());

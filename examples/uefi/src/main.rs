@@ -4,16 +4,23 @@
 #![feature(vec_leak)]
 #![feature(abi_efiapi)]
 #![feature(llvm_asm)]
+#![feature(naked_functions)]
 
 extern crate alloc;
 #[macro_use]
 extern crate log;
 extern crate rlibc;
 
+use alloc::sync::Arc;
 use rvm::*;
 use uefi::prelude::*;
 use uefi::table::boot::*;
+use x86_64::{
+    structures::paging::{PageTable, PageTableFlags as PTF},
+    PhysAddr,
+};
 
+#[naked]
 unsafe extern "C" fn hypercall() {
     for i in 0.. {
         llvm_asm!(
@@ -24,38 +31,51 @@ unsafe extern "C" fn hypercall() {
               "{cx}"(3),
               "{dx}"(3),
               "{si}"(3)
-            :
+            : "rax"
             : "volatile");
     }
 }
 
-fn run_hypervisor() -> RvmResult {
+fn setup() -> RvmResult<(Arc<Guest>, Vcpu)> {
     if !check_hypervisor_feature() {
         return Err(RvmError::NotSupported);
     }
 
-    let entry = 0x1000;
+    let entry = 0x2000;
     let gpm = DefaultGuestPhysMemorySet::new();
     let guest = Guest::new(gpm)?;
-    let mut vcpu = Vcpu::new(entry as u64, guest.clone())?;
+    let vcpu = Vcpu::new(entry as u64, guest.clone())?;
 
-    for i in 0..0x10 {
-        let guest_paddr = i * 0x1000;
-        if guest_paddr == entry {
-            let host_paddr = alloc_frame().unwrap();
-            unsafe {
-                core::ptr::copy(
-                    hypercall as usize as *const u8,
-                    host_paddr as *mut u8,
-                    0x100,
-                );
-            }
-            guest.add_memory_region(guest_paddr, 0x1000, Some(host_paddr))?
-        } else {
-            guest.add_memory_region(guest_paddr, 0x1000, None)?;
-        }
+    let hpaddr0 = alloc_frame().unwrap();
+    let hpaddr1 = alloc_frame().unwrap();
+    let hpaddr2 = alloc_frame().unwrap();
+    guest.add_memory_region(0, 0x1000, Some(hpaddr0))?;
+    guest.add_memory_region(0x1000, 0x1000, Some(hpaddr1))?;
+    guest.add_memory_region(0x2000, 0x1000, Some(hpaddr2))?;
+    unsafe {
+        core::ptr::copy(hypercall as usize as *const u8, hpaddr2 as *mut u8, 0x100);
     }
 
+    // Delay mapping
+    guest.add_memory_region(0x3000, 0x1000 * 10, None)?;
+
+    // Create guest page table
+    let pt0 = unsafe { &mut *(hpaddr0 as *mut PageTable) };
+    let pt1 = unsafe { &mut *(hpaddr1 as *mut PageTable) };
+    pt0[0].set_addr(
+        PhysAddr::new(0x1000),
+        PTF::PRESENT | PTF::WRITABLE | PTF::USER_ACCESSIBLE,
+    );
+    pt1[0].set_addr(
+        PhysAddr::new(0),
+        PTF::PRESENT | PTF::WRITABLE | PTF::USER_ACCESSIBLE | PTF::HUGE_PAGE, // 1GB page
+    );
+
+    Ok((guest, vcpu))
+}
+
+fn run_hypervisor() -> RvmResult {
+    let (_guest, mut vcpu) = setup()?;
     vcpu.write_state(&GuestState {
         xcr0: 0,
         cr2: 0,

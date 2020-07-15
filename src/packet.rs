@@ -12,7 +12,7 @@ pub enum RvmExitPacketKind {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct IoPacket {
     pub port: u16,
     pub access_size: u8,
@@ -21,23 +21,42 @@ pub struct IoPacket {
     pub repeat: bool,
 }
 
+#[cfg(target_arch = "x86_64")]
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MmioPacket {
     pub addr: u64,
+    pub inst_len: u8,
+    pub inst_buf: [u8; 15],
+    pub default_operand_size: u8,
+    pub _reserved: [u8; 7],
+}
+
+#[cfg(target_arch = "aarch64")]
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct MmioPacket {
+    pub addr: u64,
+    pub access_size: u8,
+    pub sign_extend: bool,
+    pub xt: u8,
+    pub read: bool,
+    pub _padding1: [u8; 4],
+    pub data: u64,
+    pub _reserved: u64,
 }
 
 #[repr(C)]
-union RvmExitPacketInnner {
-    io: IoPacket,
-    mmio: MmioPacket,
+pub union RvmExitPacketInnner {
+    pub io: IoPacket,
+    pub mmio: MmioPacket,
 }
 
 #[repr(C)]
 pub struct RvmExitPacket {
-    kind: RvmExitPacketKind,
-    key: u64,
-    inner: RvmExitPacketInnner,
+    pub kind: RvmExitPacketKind,
+    pub key: u64,
+    pub inner: RvmExitPacketInnner,
 }
 
 impl RvmExitPacket {
@@ -46,6 +65,14 @@ impl RvmExitPacket {
             kind: RvmExitPacketKind::GuestIo,
             key,
             inner: RvmExitPacketInnner { io: io_packet },
+        }
+    }
+
+    pub fn new_mmio_packet(key: u64, mmio_packet: MmioPacket) -> Self {
+        Self {
+            kind: RvmExitPacketKind::GuestMmio,
+            key,
+            inner: RvmExitPacketInnner { mmio: mmio_packet },
         }
     }
 }

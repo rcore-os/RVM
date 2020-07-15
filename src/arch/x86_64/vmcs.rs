@@ -4,7 +4,7 @@ use bitflags::bitflags;
 use x86::bits64::vmx;
 
 use self::{VmcsField32::*, VmcsField64::*};
-use super::defines::{invept, InvEptType};
+use super::utils::{invept, InvEptType};
 use crate::memory::{HostPhysAddr, PAGE_SIZE};
 use crate::{RvmError, RvmResult};
 
@@ -653,7 +653,7 @@ impl AutoVmcs {
         old_msr: u64,
         set: u32,
         clear: u32,
-    ) -> RvmResult<()> {
+    ) -> RvmResult {
         debug_assert!(self.vmcs_paddr != 0);
         let allowed_0 = true_msr as u32;
         let allowed_1 = (true_msr >> 32) as u32;
