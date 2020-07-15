@@ -1,8 +1,8 @@
 use alloc::{sync::Arc, vec::Vec};
 use spin::Mutex;
 
-use crate::ffi::alloc_frame;
-use crate::memory::{GuestPhysAddr, HostPhysAddr, PAGE_SIZE};
+use crate::ffi::{alloc_frame, phys_to_virt};
+use crate::memory::{GuestPhysAddr, HostPhysAddr, HostVirtAddr, PAGE_SIZE};
 use crate::memory::{GuestPhysMemorySetTrait, IntoRvmPageTableFlags, RvmPageTable};
 use crate::{ArchRvmPageTable, RvmError, RvmResult};
 
@@ -91,15 +91,15 @@ impl GuestPhysMemoryRegion {
     }
 
     /// Do real mapping when an EPT violation occurs
-    fn handle_page_fault(&self, pt: &Mutex<impl RvmPageTable>, guest_paddr: GuestPhysAddr) -> bool {
+    fn handle_page_fault(&self, gpaddr: GuestPhysAddr, pt: &Mutex<impl RvmPageTable>) -> bool {
         let mut pt = pt.lock();
-        if let Ok(target) = pt.query(guest_paddr) {
+        if let Ok(target) = pt.query(gpaddr) {
             if target != 0 {
                 return false;
             }
         }
         let frame = alloc_frame().expect("failed to alloc frame");
-        pt.map(guest_paddr, frame, self.attr).unwrap();
+        pt.map(gpaddr, frame, self.attr).unwrap();
         // TODO: flush TLB?
         true
     }
@@ -125,6 +125,22 @@ impl DefaultGuestPhysMemorySet {
         })
     }
 
+    fn find_region<F, T>(&self, gpaddr: GuestPhysAddr, op: F) -> RvmResult<T>
+    where
+        F: FnOnce(&GuestPhysMemoryRegion) -> RvmResult<T>,
+    {
+        if let Some(region) = self
+            .regions
+            .lock()
+            .iter()
+            .find(|region| region.contains(gpaddr))
+        {
+            op(region)
+        } else {
+            Err(RvmError::NotFound)
+        }
+    }
+
     /// Test if [`start_paddr`, `end_paddr`) is a free region.
     fn test_free_region(&self, start_paddr: GuestPhysAddr, end_paddr: GuestPhysAddr) -> bool {
         self.regions
@@ -142,6 +158,24 @@ impl DefaultGuestPhysMemorySet {
             region.unmap(&self.rvm_page_table);
         }
         regions.clear();
+    }
+
+    fn query_range(&self, gpaddr: GuestPhysAddr, size: usize) -> RvmResult<HostVirtAddr> {
+        if size > PAGE_SIZE {
+            return Err(RvmError::OutOfRange);
+        }
+        let page_off = gpaddr & (PAGE_SIZE - 1);
+        if (page_off + size) > PAGE_SIZE {
+            return Err(RvmError::NotSupported);
+        }
+        self.find_region(gpaddr, |region: &GuestPhysMemoryRegion| {
+            if gpaddr + size > region.end_paddr {
+                return Err(RvmError::OutOfRange);
+            }
+            let hpaddr = self.rvm_page_table.lock().query(gpaddr)? + page_off;
+            let hvaddr = phys_to_virt(hpaddr);
+            Ok(hvaddr)
+        })
     }
 }
 
@@ -216,23 +250,26 @@ impl GuestPhysMemorySetTrait for DefaultGuestPhysMemorySet {
         Ok(())
     }
 
-    fn query(&self, gpaddr: GuestPhysAddr) -> RvmResult<HostPhysAddr> {
-        self.rvm_page_table.lock().query(gpaddr)
+    fn read_memory(&self, gpaddr: GuestPhysAddr, buf: &mut [u8]) -> RvmResult<usize> {
+        let size = buf.len();
+        let hvaddr = self.query_range(gpaddr, size)?;
+        unsafe { buf.copy_from_slice(core::slice::from_raw_parts(hvaddr as *const u8, size)) }
+        Ok(size)
+    }
+
+    fn write_memory(&self, gpaddr: GuestPhysAddr, buf: &[u8]) -> RvmResult<usize> {
+        let size = buf.len();
+        let hvaddr = self.query_range(gpaddr, size)?;
+        unsafe { core::slice::from_raw_parts_mut(hvaddr as *mut u8, size).copy_from_slice(buf) }
+        Ok(size)
     }
 
     fn handle_page_fault(&self, gpaddr: GuestPhysAddr) -> RvmResult {
         debug!("[RVM] handle RVM page fault @ {:#x}", gpaddr);
-        if let Some(region) = self
-            .regions
-            .lock()
-            .iter()
-            .find(|region| region.contains(gpaddr))
-        {
-            region.handle_page_fault(&self.rvm_page_table, gpaddr);
+        self.find_region(gpaddr, |region| {
+            region.handle_page_fault(gpaddr, &self.rvm_page_table);
             Ok(())
-        } else {
-            Err(RvmError::NotFound)
-        }
+        })
     }
 
     fn table_phys(&self) -> HostPhysAddr {

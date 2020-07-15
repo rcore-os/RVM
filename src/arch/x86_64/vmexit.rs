@@ -520,16 +520,15 @@ pub fn vmexit_handler(
     };
 
     if res.is_err() {
+        let mut buf = vec![0; exit_info.exit_instruction_length as usize];
+        gpm.read_memory(vmcs.readXX(GUEST_CS_BASE) + exit_info.guest_rip, &mut buf)
+            .expect("[RVM] read guest memory failed");
         warn!(
-            "[RVM] VM exit handler for reason {:?} returned {:?}\n{}\nInstruction: {:x?}",
+            "[RVM] VM exit handler for reason {:?} returned {:?}\n{}\nInstruction: {:02x?}",
             exit_info.exit_reason,
             res,
             guest_state.dump(&vmcs),
-            gpm.read_memory_as_vec(
-                vmcs.readXX(GUEST_CS_BASE) + exit_info.guest_rip,
-                exit_info.exit_instruction_length as usize
-            )
-            .expect("[RVM] read guest memory failed"),
+            buf
         );
     }
     res
