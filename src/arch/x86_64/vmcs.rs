@@ -427,6 +427,9 @@ bitflags! {
         const TSS_BUSY_16       = 0b0011;
         /// TSS (Busy) for 32/64-bit
         const TSS_BUSY          = 0b1011;
+
+        /// Descriptor privilege level (User)
+        const DPL_USER          = 3 << 5;
     }
 }
 

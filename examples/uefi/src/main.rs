@@ -32,7 +32,7 @@ unsafe extern "C" fn hypercall() {
             : "rax"
             : "volatile");
     }
-    asm!("hlt");
+    asm!("mov qword ptr [$0xfff233], $2333");
 }
 
 fn setup() -> RvmResult<(Arc<Guest>, Vcpu)> {
@@ -57,6 +57,9 @@ fn setup() -> RvmResult<(Arc<Guest>, Vcpu)> {
 
     // Delay mapping
     guest.add_memory_region(0x3000, 0x1000 * 10, None)?;
+
+    // Set MMIO trap
+    guest.set_trap(TrapKind::GuestTrapMem, 0xfff000, 0x1000, 0x2333)?;
 
     // Create guest page table
     let pt0 = unsafe { &mut *(hpaddr0 as *mut PageTable) };
@@ -94,7 +97,7 @@ fn run_hypervisor() -> RvmResult {
         r15: 15,
         rflags: 0,
     })?;
-    info!("{:?}", vcpu.resume());
+    info!("{:#x?}", vcpu.resume());
     info!("{:#x?}", vcpu.read_state()?);
     Ok(())
 }

@@ -9,9 +9,10 @@ use x86_64::registers::model_specific::EferFlags;
 use super::feature::*;
 use super::structs::ExitReason;
 use super::vcpu::{GuestState, InterruptState};
+use super::vmcall::VmcallStatus;
 use super::vmcs::{
-    AutoVmcs, GuestRegisterAccessRights, VmcsField16::*, VmcsField32::*, VmcsField64::*,
-    VmcsFieldXX::*,
+    AutoVmcs, GuestRegisterAccessRights, InterruptibilityState, VmcsField16::*, VmcsField32::*,
+    VmcsField64::*, VmcsFieldXX::*,
 };
 use crate::memory::GuestPhysMemorySetTrait;
 use crate::packet::*;
@@ -55,7 +56,14 @@ impl ExitInfo {
         vmcs.writeXX(
             GUEST_RIP,
             self.guest_rip + self.exit_instruction_length as usize,
-        )
+        );
+        use InterruptibilityState as IntrState;
+        let old = IntrState::from_bits_truncate(vmcs.read32(GUEST_INTERRUPTIBILITY_STATE));
+        let mut new = old;
+        new.remove(IntrState::BLOCKING_BY_STI | IntrState::BLOCKING_BY_MOV_SS);
+        if new != old {
+            vmcs.write32(GUEST_INTERRUPTIBILITY_STATE, new.bits())
+        }
     }
 }
 
@@ -334,8 +342,27 @@ fn handle_vmcall(
         guest_state.rdx,
         guest_state.rsi,
     ];
-    guest_state.rax = 0;
-    info!("[RVM] VM exit: VMCALL({:#x}) args: {:x?}", num, args);
+
+    let access_rights = vmcs.read32(GUEST_SS_AR_BYTES);
+    if access_rights & GuestRegisterAccessRights::DPL_USER.bits() != 0 {
+        guest_state.rax = VmcallStatus::NotPermitted as u64;
+        return Ok(None);
+    }
+
+    let [a0, a1, a2, a3] = args;
+    let status = super::vmcall::vmcall(num, a0, a1, a2, a3);
+    guest_state.rax = status as u64;
+    Ok(None)
+}
+
+fn handle_hlt(exit_info: &ExitInfo, vmcs: &mut AutoVmcs) -> ExitResult {
+    exit_info.next_rip(vmcs);
+    // TODO: wait for interrupt
+    Ok(None)
+}
+
+fn handle_pause(exit_info: &ExitInfo, vmcs: &mut AutoVmcs) -> ExitResult {
+    exit_info.next_rip(vmcs);
     Ok(None)
 }
 
@@ -528,10 +555,12 @@ pub fn vmexit_handler(
         ExitReason::EXTERNAL_INTERRUPT => handle_external_interrupt(vmcs, interrupt_state),
         ExitReason::INTERRUPT_WINDOW => handle_interrupt_window(vmcs),
         ExitReason::CPUID => handle_cpuid(&exit_info, vmcs, guest_state),
+        ExitReason::HLT => handle_hlt(&exit_info, vmcs),
         ExitReason::VMCALL => handle_vmcall(&exit_info, vmcs, guest_state),
         ExitReason::IO_INSTRUCTION => {
             handle_io_instruction(&exit_info, vmcs, guest_state, interrupt_state, traps)
         }
+        ExitReason::PAUSE => handle_pause(&exit_info, vmcs),
         ExitReason::EPT_VIOLATION => handle_ept_violation(&exit_info, vmcs, gpm, traps),
         _ => Err(RvmError::NotSupported),
     };

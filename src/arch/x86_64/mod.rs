@@ -9,6 +9,7 @@ mod structs;
 mod timer;
 mod utils;
 mod vcpu;
+mod vmcall;
 mod vmcs;
 mod vmexit;
 
