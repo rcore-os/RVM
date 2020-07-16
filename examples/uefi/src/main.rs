@@ -59,7 +59,7 @@ fn setup() -> RvmResult<(Arc<Guest>, Vcpu)> {
     guest.add_memory_region(0x3000, 0x1000 * 10, None)?;
 
     // Set MMIO trap
-    guest.set_trap(TrapKind::GuestTrapMem, 0xfff000, 0x1000, 0x2333)?;
+    guest.set_trap(TrapKind::GuestTrapMem, 0xfff000, 0x1000, None, 0x2333)?;
 
     // Create guest page table
     let pt0 = unsafe { &mut *(hpaddr0 as *mut PageTable) };
@@ -97,8 +97,24 @@ fn run_hypervisor() -> RvmResult {
         r15: 15,
         rflags: 0,
     })?;
-    info!("{:#x?}", vcpu.resume());
-    info!("{:#x?}", vcpu.read_state()?);
+
+    let packet = vcpu.resume()?;
+    let state = vcpu.read_state()?;
+    info!("{:#x?}", packet);
+    info!("{:#x?}", state);
+
+    assert_eq!(packet.kind, RvmExitPacketKind::GuestMmio);
+    assert_eq!(packet.key, 0x2333);
+    assert_eq!(unsafe { packet.inner.mmio.addr }, 0xfff233);
+    assert_eq!(unsafe { packet.inner.mmio.inst_len }, 0xc);
+    assert_eq!(unsafe { packet.inner.mmio.default_operand_size }, 0x4 );
+    assert_eq!(
+        unsafe { &packet.inner.mmio.inst_buf[0..12] },
+        &[0x48, 0xc7, 0x4, 0x25, 0x33, 0xf2, 0xff, 0x0, 0x1d, 0x9, 0x0, 0x0]
+    );
+    assert_eq!(state.rflags, 0x44);
+    info!("Run hypervisor successfully!");
+
     Ok(())
 }
 

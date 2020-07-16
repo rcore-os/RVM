@@ -3,12 +3,19 @@
 use core::fmt::{Debug, Formatter, Result};
 
 #[repr(u32)]
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub enum RvmExitPacketKind {
-    GuestIo = 1,
-    GuestMmio = 2,
-    GuestVcpu = 3,
+    GuestBell = 1,
+    GuestIo = 2,
+    GuestMmio = 3,
+    GuestVcpu = 4,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct BellPacket {
+    pub addr: u64,
 }
 
 #[repr(C)]
@@ -30,7 +37,6 @@ pub struct MmioPacket {
     pub inst_len: u8,
     pub inst_buf: [u8; 15],
     pub default_operand_size: u8,
-    pub _reserved: [u8; 7],
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -44,11 +50,11 @@ pub struct MmioPacket {
     pub read: bool,
     pub _padding1: [u8; 4],
     pub data: u64,
-    pub _reserved: u64,
 }
 
 #[repr(C)]
 pub union RvmExitPacketInnner {
+    pub bell: BellPacket,
     pub io: IoPacket,
     pub mmio: MmioPacket,
 }
@@ -61,6 +67,16 @@ pub struct RvmExitPacket {
 }
 
 impl RvmExitPacket {
+    pub fn new_bell_packet(key: u64, addr: u64) -> Self {
+        Self {
+            kind: RvmExitPacketKind::GuestBell,
+            key,
+            inner: RvmExitPacketInnner {
+                bell: BellPacket { addr },
+            },
+        }
+    }
+
     pub fn new_io_packet(key: u64, io_packet: IoPacket) -> Self {
         Self {
             kind: RvmExitPacketKind::GuestIo,
@@ -84,6 +100,7 @@ impl Debug for RvmExitPacket {
         out.field("kind", &self.kind).field("key", &self.key);
         unsafe {
             match self.kind {
+                RvmExitPacketKind::GuestBell => out.field("inner", &self.inner.bell),
                 RvmExitPacketKind::GuestIo => out.field("inner", &self.inner.io),
                 RvmExitPacketKind::GuestMmio => out.field("inner", &self.inner.mmio),
                 _ => out.field("inner", &"Unknown"),

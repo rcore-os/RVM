@@ -184,12 +184,7 @@ impl GuestPhysMemorySetTrait for DefaultGuestPhysMemorySet {
         1 << 32
     }
 
-    fn add_map(
-        &self,
-        gpaddr: GuestPhysAddr,
-        size: usize,
-        hpaddr: Option<HostPhysAddr>,
-    ) -> RvmResult {
+    fn map(&self, gpaddr: GuestPhysAddr, size: usize, hpaddr: Option<HostPhysAddr>) -> RvmResult {
         let start_paddr = gpaddr & !(PAGE_SIZE - 1);
         let end_paddr = (start_paddr + size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
         if start_paddr >= end_paddr {
@@ -218,7 +213,7 @@ impl GuestPhysMemorySetTrait for DefaultGuestPhysMemorySet {
         Ok(())
     }
 
-    fn remove_map(&self, gpaddr: GuestPhysAddr, size: usize) -> RvmResult {
+    fn unmap(&self, gpaddr: GuestPhysAddr, size: usize) -> RvmResult {
         let start_paddr = gpaddr & !(PAGE_SIZE - 1);
         let end_paddr = (start_paddr + size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
         if start_paddr >= end_paddr {

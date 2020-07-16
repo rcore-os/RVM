@@ -27,7 +27,7 @@ pub use dummy::DefaultGuestPhysMemorySet;
 pub use memory::*;
 pub use packet::*;
 pub use rvm_macros::*;
-pub use trap_map::TrapKind;
+pub use trap_map::{RvmPort, TrapKind};
 
 pub type RvmResult<T = ()> = Result<T, RvmError>;
 

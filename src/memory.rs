@@ -43,15 +43,10 @@ pub trait GuestPhysMemorySetTrait: core::fmt::Debug + Send + Sync {
 
     /// Add a contiguous guest physical memory region and create mapping,
     /// with the target host physical address `hpaddr` (optional).
-    fn add_map(
-        &self,
-        gpaddr: GuestPhysAddr,
-        size: usize,
-        hpaddr: Option<HostPhysAddr>,
-    ) -> RvmResult;
+    fn map(&self, gpaddr: GuestPhysAddr, size: usize, hpaddr: Option<HostPhysAddr>) -> RvmResult;
 
     /// Remove a guest physical memory region, destroy the mapping.
-    fn remove_map(&self, gpaddr: GuestPhysAddr, size: usize) -> RvmResult;
+    fn unmap(&self, gpaddr: GuestPhysAddr, size: usize) -> RvmResult;
 
     /// Read from guest address space.
     fn read_memory(&self, gpaddr: GuestPhysAddr, buf: &mut [u8]) -> RvmResult<usize>;

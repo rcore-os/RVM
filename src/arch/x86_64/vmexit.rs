@@ -454,10 +454,12 @@ fn handle_io_instruction(
 /// Returns:
 /// - `Ok(RvmExitPacket)` if it's an MMIO access, need to forward the packet to
 ///   the userspace handler.
-/// - `Ok(None)` if it's not an MMIO access, handle it as a normal EPT page fault.
+/// - `Ok(None)` if it's an asynchronous MMIO access (bell), send packet via port.
+/// - `Err(NotFound)` if it's not an MMIO access, handle it as a normal EPT page fault.
 /// - `Err(RvmError)` if an error occurs.
 fn handle_mmio(
     exit_info: &ExitInfo,
+    ept_vio_info: &EptViolationInfo,
     vmcs: &mut AutoVmcs,
     guest_paddr: usize,
     gpm: &Arc<dyn GuestPhysMemorySetTrait>,
@@ -467,14 +469,25 @@ fn handle_mmio(
         return Err(RvmError::Internal);
     }
 
-    let trap = match traps.lock().find(TrapKind::GuestTrapMem, guest_paddr) {
-        Some(t) => t,
-        None => return Ok(None),
-    };
+    let trap = traps
+        .lock()
+        .find(TrapKind::GuestTrapMem, guest_paddr)
+        .ok_or(RvmError::NotFound)?;
 
     exit_info.next_rip(vmcs);
     match trap.kind {
-        TrapKind::GuestTrapBell => Err(RvmError::NotSupported),
+        TrapKind::GuestTrapBell => {
+            if ept_vio_info.read {
+                return Err(RvmError::NotSupported);
+            }
+            if let Some(port) = trap.port {
+                let packet = RvmExitPacket::new_bell_packet(trap.key, guest_paddr as u64);
+                port.send(packet)?;
+                Ok(None)
+            } else {
+                Err(RvmError::BadState)
+            }
+        }
         TrapKind::GuestTrapMem => {
             let efer = EferFlags::from_bits_truncate(vmcs.read64(GUEST_IA32_EFER));
             let cs_rights =
@@ -510,7 +523,7 @@ fn handle_ept_violation(
     gpm: &Arc<dyn GuestPhysMemorySetTrait>,
     traps: &Mutex<TrapMap>,
 ) -> ExitResult {
-    let _info = EptViolationInfo::from(exit_info.exit_qualification);
+    let ept_vio_info = EptViolationInfo::from(exit_info.exit_qualification);
     let guest_paddr = vmcs.read64(GUEST_PHYSICAL_ADDRESS) as usize;
     trace!(
         "[RVM] VM exit: EPT violation @ {:#x} RIP({:#x})",
@@ -518,19 +531,19 @@ fn handle_ept_violation(
         exit_info.guest_rip
     );
 
-    if let Some(packet) = handle_mmio(exit_info, vmcs, guest_paddr, gpm, traps)? {
-        return Ok(Some(packet));
-    }
-
-    match gpm.handle_page_fault(guest_paddr) {
-        Err(e) => {
-            warn!(
-                "[RVM] VM exit: Unhandled EPT violation @ {:#x}",
-                guest_paddr
-            );
-            Err(e)
+    match handle_mmio(exit_info, &ept_vio_info, vmcs, guest_paddr, gpm, traps) {
+        Ok(packet) => Ok(packet),
+        Err(RvmError::NotFound) => {
+            gpm.handle_page_fault(guest_paddr).map_err(|e| {
+                warn!(
+                    "[RVM] VM exit: Unhandled EPT violation @ {:#x}",
+                    guest_paddr
+                );
+                e
+            })?;
+            Ok(None)
         }
-        _ => Ok(None),
+        Err(err) => Err(err),
     }
 }
 

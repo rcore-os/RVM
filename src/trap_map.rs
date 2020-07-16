@@ -1,19 +1,21 @@
 //! Some structures to manage traps caused by MMIO/PIO.
 
 use alloc::collections::{btree_map::Entry, BTreeMap};
+use alloc::sync::Arc;
 use core::convert::TryFrom;
 
+use crate::packet::RvmExitPacket;
 use crate::{RvmError, RvmResult};
 
 #[repr(u32)]
 #[allow(dead_code)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TrapKind {
-    /// Asynchronous trap with MMIO.
+    /// Asynchronous trap caused by MMIO.
     GuestTrapBell = 0,
-    /// Synchronous traps with MMIO.
+    /// Synchronous traps caused by MMIO.
     GuestTrapMem = 1,
-    /// Synchronous traps with I/O instructions.
+    /// Synchronous traps caused by I/O instructions.
     GuestTrapIo = 2,
     /// Invalid
     _Invalid,
@@ -32,12 +34,13 @@ impl TryFrom<u32> for TrapKind {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct Trap {
     pub kind: TrapKind,
     pub addr: usize,
     pub size: usize,
     pub key: u64,
+    pub port: Option<Arc<dyn RvmPort>>,
 }
 
 impl Trap {
@@ -63,13 +66,20 @@ impl TrapMap {
         };
         if let Some((_, trap)) = traps.range(..=addr).last() {
             if trap.contains(addr) {
-                return Some(*trap);
+                return Some(trap.clone());
             }
         }
         None
     }
 
-    pub fn push(&mut self, kind: TrapKind, addr: usize, size: usize, key: u64) -> RvmResult {
+    pub fn push(
+        &mut self,
+        kind: TrapKind,
+        addr: usize,
+        size: usize,
+        port: Option<Arc<dyn RvmPort>>,
+        key: u64,
+    ) -> RvmResult {
         let traps = match kind {
             #[cfg(target_arch = "x86_64")]
             TrapKind::GuestTrapIo => &mut self.io_traps,
@@ -81,6 +91,7 @@ impl TrapMap {
             addr,
             size,
             key,
+            port,
         };
         let entry = traps.entry(addr);
         if let Entry::Vacant(e) = entry {
@@ -90,4 +101,9 @@ impl TrapMap {
             Err(RvmError::InvalidParam)
         }
     }
+}
+
+/// Used for sending asynchronous message
+pub trait RvmPort: core::fmt::Debug + Send + Sync {
+    fn send(&self, packet: RvmExitPacket) -> RvmResult;
 }
