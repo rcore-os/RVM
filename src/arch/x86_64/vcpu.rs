@@ -4,7 +4,7 @@ use super::{
     msr::*,
     structs::{MsrList, VmInstructionError, VmxPage},
     timer::PitTimer,
-    utils::{cr0_is_valid, cr4_is_valid},
+    utils::{cr0_is_valid, cr4_is_valid, tr_base},
     vmcs::*,
     vmcs::{VmcsField16::*, VmcsField32::*, VmcsField64::*, VmcsFieldXX::*},
     vmexit::vmexit_handler,
@@ -843,18 +843,4 @@ unsafe extern "sysv64" fn vmx_exit() -> bool {
     : "intel", "volatile");
 
     false
-}
-
-/// Get TR base.
-unsafe fn tr_base(tr: u16) -> u64 {
-    let mut dtp = x86::dtables::DescriptorTablePointer::new(&0u64);
-    llvm_asm!("sgdt ($0)" :: "r"(&mut dtp) : "memory" : "volatile");
-    let tss_descriptor = (dtp.base as usize + tr as usize) as *mut u64;
-    let low = tss_descriptor.read();
-    let high = tss_descriptor.add(1).read();
-    let mut tr_base = 0u64;
-    tr_base.set_bits(0..24, low.get_bits(16..40));
-    tr_base.set_bits(24..32, low.get_bits(56..64));
-    tr_base.set_bits(32..64, high.get_bits(0..32));
-    tr_base
 }

@@ -198,3 +198,9 @@ fn dealloc_frame(paddr: usize) {
 fn phys_to_virt(paddr: usize) -> usize {
     paddr
 }
+
+/// Do not handle external interrupts
+#[rvm::extern_fn(x86_all_traps_handler_addr)]
+fn x86_all_traps_handler_addr() -> usize {
+    0
+}

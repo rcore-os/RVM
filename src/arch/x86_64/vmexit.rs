@@ -8,6 +8,7 @@ use x86_64::registers::model_specific::EferFlags;
 
 use super::feature::*;
 use super::structs::ExitReason;
+use super::utils::manual_trap;
 use super::vcpu::{GuestState, InterruptState};
 use super::vmcall::VmcallStatus;
 use super::vmcs::{
@@ -128,7 +129,8 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
     trace!("[RVM] VM exit: External interrupt {:#x?}", info);
     debug_assert!(info.valid);
     debug_assert!(info.interruption_type == 0);
-    // manual_trap(info.vector as usize);
+
+    unsafe { manual_trap(info.vector as usize, 0) };
 
     use super::consts as int_num;
     match info.vector - int_num::IRQ0 {
@@ -140,10 +142,6 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
     };
 
     Ok(None)
-}
-
-fn _manual_trap(_vector: usize) {
-    todo!();
 }
 
 fn handle_interrupt_window(vmcs: &mut AutoVmcs) -> ExitResult {

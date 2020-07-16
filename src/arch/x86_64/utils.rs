@@ -1,5 +1,6 @@
 //! Some utility functions.
 
+use bit_field::BitField;
 use x86::msr;
 use x86_64::registers::model_specific::Msr;
 
@@ -59,4 +60,53 @@ pub(crate) fn cr4_is_valid(cr4_value: u64) -> bool {
         msr::IA32_VMX_CR4_FIXED0,
         msr::IA32_VMX_CR4_FIXED1,
     )
+}
+
+/// Get TR base.
+pub unsafe fn tr_base(tr: u16) -> u64 {
+    let mut dtp = x86::dtables::DescriptorTablePointer::new(&0u64);
+    llvm_asm!("sgdt ($0)" :: "r"(&mut dtp) : "memory" : "volatile");
+    let tss_descriptor = (dtp.base as usize + tr as usize) as *mut u64;
+    let low = tss_descriptor.read();
+    let high = tss_descriptor.add(1).read();
+    let mut tr_base = 0u64;
+    tr_base.set_bits(0..24, low.get_bits(16..40));
+    tr_base.set_bits(24..32, low.get_bits(56..64));
+    tr_base.set_bits(32..64, high.get_bits(0..32));
+    tr_base
+}
+
+/// Call external interrupt handler manually without actually issuing interrupt
+pub unsafe fn manual_trap(vector: usize, error_code: usize) {
+    let target_addr = crate::ffi::x86_all_traps_handler_addr();
+    if target_addr == 0 {
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    asm!("
+        mov r8, ss              # save ss -> r18
+        mov r9, rsp             # save rsp -> r9
+        pushf
+        pop r10                 # save rlags -> r10
+        mov r11, cs             # save cs -> r11
+        lea rax, [rip + 1f]     # save return address -> rax
+
+        push r8                 # ss
+        push r9                 # rsp
+        push r10                # rflags
+        push r11                # cs
+        push rax                # rip
+        push {0}                # error_code
+        push {1}                # trap_num
+        jmp {2}
+1:",
+        in(reg) error_code,
+        in(reg) vector,
+        in(reg) target_addr,
+        out("r8") _,
+        out("r9") _,
+        out("r10") _,
+        out("r11") _,
+        out("rax") _,
+    );
 }

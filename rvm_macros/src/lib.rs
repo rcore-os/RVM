@@ -1,7 +1,12 @@
 use proc_macro::TokenStream;
 use syn::{Abi, Attribute, ItemFn};
 
-const ALLOWED_FN_LIST: &[&str] = &["alloc_frame", "dealloc_frame", "phys_to_virt"];
+const ALLOWED_FN_LIST: &[&str] = &[
+    "alloc_frame",
+    "dealloc_frame",
+    "phys_to_virt",
+    "x86_all_traps_handler_addr",
+];
 
 #[proc_macro_attribute]
 pub fn extern_fn(attr: TokenStream, item: TokenStream) -> TokenStream {
