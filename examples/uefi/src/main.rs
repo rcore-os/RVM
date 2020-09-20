@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![feature(asm)]
-#![feature(vec_leak)]
 #![feature(abi_efiapi)]
 #![feature(llvm_asm)]
 

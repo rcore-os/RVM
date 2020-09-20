@@ -500,16 +500,16 @@ bitflags! {
 impl InterruptionInfo {
     pub fn has_error_code(vector: u8) -> bool {
         use super::consts as int_num;
-        match vector {
+        matches!(
+            vector,
             int_num::DoubleFault
-            | int_num::InvalidTSS
-            | int_num::SegmentNotPresent
-            | int_num::StackSegmentFault
-            | int_num::GeneralProtectionFault
-            | int_num::PageFault
-            | int_num::AlignmentCheck => true,
-            _ => false,
-        }
+                | int_num::InvalidTSS
+                | int_num::SegmentNotPresent
+                | int_num::StackSegmentFault
+                | int_num::GeneralProtectionFault
+                | int_num::PageFault
+                | int_num::AlignmentCheck
+        )
     }
 
     pub fn from_vector(vector: u8) -> Self {

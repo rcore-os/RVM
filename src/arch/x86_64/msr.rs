@@ -23,7 +23,8 @@ trait MsrReadWrite {
     /// Does not preserve any bits, including reserved fields.
     #[inline]
     unsafe fn write_raw(flags: u64) {
-        Self::MSR.write(flags);
+        let mut msr = Self::MSR;
+        msr.write(flags);
     }
 }
 

@@ -26,6 +26,7 @@ pub struct IoPacket {
     pub input: bool,
     pub string: bool,
     pub repeat: bool,
+    pub _padding1: [u8; 2],
     pub data: [u8; 4],
 }
 

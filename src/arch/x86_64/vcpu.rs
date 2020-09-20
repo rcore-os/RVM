@@ -357,12 +357,16 @@ impl Vcpu {
         }
         vmcs.writeXX(GUEST_CR0, cr0.bits() as usize);
         // Ensure that CR0.NE remains set by masking and manually handling writes to CR0 that unset it.
+        // TODO: implement CONTROL_REGISTER_ACCESS VM exit handling
         vmcs.writeXX(
             CR0_GUEST_HOST_MASK,
             (Cr0Flags::NUMERIC_ERROR | Cr0Flags::NOT_WRITE_THROUGH | Cr0Flags::CACHE_DISABLE).bits()
                 as usize,
         );
-        vmcs.writeXX(CR0_READ_SHADOW, Cr0Flags::CACHE_DISABLE.bits() as usize); // TODO: ET bit
+        vmcs.writeXX(
+            CR0_READ_SHADOW,
+            (Cr0Flags::NUMERIC_ERROR | Cr0Flags::CACHE_DISABLE).bits() as usize,
+        ); // TODO: ET bit
 
         // Setup CR4
         // Enable the PAE bit on the BSP for 64-bit paging.

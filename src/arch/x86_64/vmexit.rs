@@ -442,6 +442,7 @@ fn handle_io_instruction(
             input: io_info.input,
             string: io_info.string,
             repeat: io_info.repeat,
+            _padding1: Default::default(),
             data,
         },
     )))
@@ -577,6 +578,7 @@ pub fn vmexit_handler(
     };
 
     if res.is_err() {
+        // FIXME: read via guest vaddr
         let mut buf = vec![0; exit_info.exit_instruction_length as usize];
         gpm.read_memory(vmcs.readXX(GUEST_CS_BASE) + exit_info.guest_rip, &mut buf)
             .expect("[RVM] read guest memory failed");

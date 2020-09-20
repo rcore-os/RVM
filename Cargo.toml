@@ -1,6 +1,6 @@
 [package]
 name = "rvm"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["equation314 <equation618@gmail.com>", "chenyu <believe.chenyu@gmail.com>"]
 edition = "2018"
 description = "Rcore virtual machine"

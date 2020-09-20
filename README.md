@@ -2,13 +2,13 @@
 
 [![CI](https://github.com/rcore-os/RVM/workflows/CI/badge.svg?branch=master)](https://github.com/rcore-os/RVM/actions)
 
-A small hypervisor for [zCore OS](https://github.com/rcore-os/zCore) or bare-metal.
+A experimental hypervisor library written in Rust to build both type-1 and type-2 hypervisors.
 
 Supported architecture: x86_64 (Intel VMX).
 
 ## Basic usage
 
-See the [UEFI example](examples/uefi/src/main.rs)for more detail.
+See the [UEFI example](examples/uefi/src/main.rs) for more detail.
 
 ```rust
 use rvm::*;
@@ -34,6 +34,10 @@ fn run_hypervisor() -> RvmResult {
     // to return.
     guest.set_trap(TrapKind::GuestTrapIo, 0x233, 2, None, 0xdeadbeef)?;
 
+    // The bootstrap processor is in IA-32e mode and enabled paging, you need to
+    // setup guest page table.
+    setup_guest_page_table(host_paddr);
+
     // run the VCPU and block, until the specified traps occurs.
     let packet = vcpu.resume()?;
 
@@ -43,3 +47,14 @@ fn run_hypervisor() -> RvmResult {
     Ok(())
 }
 ```
+
+## More examples
+
+RVM is used as the hypervisor module of the following OS:
+
+* [rCore](https://github.com/rcore-os/rCore)
+* [zCore](https://github.com/rcore-os/zCore)
+
+## Documents
+
+* [in Chinese](https://github.com/rcore-os/RVM/wiki)

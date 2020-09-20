@@ -7,7 +7,7 @@ use crate::memory::{GuestPhysMemorySetTrait, IntoRvmPageTableFlags, RvmPageTable
 use crate::{ArchRvmPageTable, RvmError, RvmResult};
 
 #[derive(Debug, Clone, Copy)]
-struct GuestMemoryAttr {
+pub struct GuestMemoryAttr {
     // TODO: cache policy
     read: bool,
     write: bool,
@@ -47,7 +47,7 @@ impl IntoRvmPageTableFlags for GuestMemoryAttr {
 }
 
 #[derive(Debug)]
-struct GuestPhysMemoryRegion {
+pub struct GuestPhysMemoryRegion {
     start_paddr: GuestPhysAddr,
     end_paddr: GuestPhysAddr,
     attr: GuestMemoryAttr,
@@ -110,9 +110,9 @@ impl GuestPhysMemoryRegion {
 /// violation in Intel VMX).
 #[derive(Debug)]
 pub struct DefaultGuestPhysMemorySet {
-    regions: Mutex<Vec<GuestPhysMemoryRegion>>,
-    rvm_page_table: Mutex<ArchRvmPageTable>,
-    table_phys: HostPhysAddr,
+    pub regions: Mutex<Vec<GuestPhysMemoryRegion>>,
+    pub rvm_page_table: Mutex<ArchRvmPageTable>,
+    pub table_phys: HostPhysAddr,
 }
 
 impl DefaultGuestPhysMemorySet {

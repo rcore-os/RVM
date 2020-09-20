@@ -24,7 +24,7 @@ mod trap_map;
 
 #[cfg(target_arch = "x86_64")]
 pub use arch::{check_hypervisor_feature, ArchRvmPageTable, Guest, Vcpu};
-pub use dummy::DefaultGuestPhysMemorySet;
+pub use dummy::{DefaultGuestPhysMemorySet, GuestMemoryAttr};
 pub use memory::*;
 pub use packet::*;
 pub use rvm_macros::*;
