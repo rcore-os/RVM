@@ -1,6 +1,6 @@
 [package]
 name = "rvm"
-version = "1.0.1"
+version = "1.0.2"
 authors = ["equation314 <equation618@gmail.com>", "chenyu <believe.chenyu@gmail.com>"]
 edition = "2018"
 description = "Rcore virtual machine"
@@ -14,11 +14,11 @@ bitflags = "1.2"
 bit_field = "0.10"
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
 bit-set = { version = "0.5", default-features = false }
-bitmap-allocator = { git = "https://github.com/rcore-os/bitmap-allocator" }
+bitmap-allocator = { git = "https://github.com/rcore-os/bitmap-allocator", rev = "03bd990" }
 numeric-enum-macro = "0.2"
 rvm_macros = { path = "./rvm_macros" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86 = "0.33"
-x86_64 = "0.11"
+x86_64 = "0.12"
 raw-cpuid = "8.0"
