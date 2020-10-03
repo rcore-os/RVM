@@ -2,7 +2,7 @@
 
 use bit_field::BitField;
 use x86::msr;
-use x86_64::registers::model_specific::Msr;
+use x86_64::registers::{control::Cr0Flags, model_specific::Msr};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
@@ -45,9 +45,15 @@ fn cr_is_valid(cr_value: u64, fixed0_msr: u32, fixed1_msr: u32) -> bool {
 }
 
 /// Check whether the CR0 has required fixed bits.
-pub(crate) fn cr0_is_valid(cr0_value: u64) -> bool {
+pub(crate) fn cr0_is_valid(cr0_value: u64, is_unrestricted_guest: bool) -> bool {
+    let mut check_value = cr0_value;
+    // From Volume 3, Section 26.3.1.1: PE and PG bits of CR0 are not checked when unrestricted
+    // guest is enabled. Set both here to avoid clashing with X86_MSR_IA32_VMX_CR0_FIXED1.
+    if is_unrestricted_guest {
+        check_value |= (Cr0Flags::PAGING | Cr0Flags::PROTECTED_MODE_ENABLE).bits();
+    }
     cr_is_valid(
-        cr0_value,
+        check_value,
         msr::IA32_VMX_CR0_FIXED0,
         msr::IA32_VMX_CR0_FIXED1,
     )

@@ -343,16 +343,12 @@ impl Vcpu {
             // Enable protected mode and paging on the BSP.
             cr0 |= Cr0Flags::PAGING | Cr0Flags::PROTECTED_MODE_ENABLE;
         }
-        // From Volume 3, Section 26.3.1.1: PE and PG bits of CR0 are not checked when unrestricted
-        // guest is enabled. Set both here to avoid clashing with X86_MSR_IA32_VMX_CR0_FIXED1.
-        let mut cr0_check = cr0;
+
         use SecondaryCpuBasedVmExecControls as CpuCtrl2;
-        if CpuCtrl2::from_bits_truncate(vmcs.read32(SECONDARY_VM_EXEC_CONTROL))
-            .contains(CpuCtrl2::UNRESTRICTED_GUEST)
-        {
-            cr0_check |= Cr0Flags::PAGING | Cr0Flags::PROTECTED_MODE_ENABLE;
-        }
-        if !cr0_is_valid(cr0_check.bits()) {
+        let is_unrestricted_guest =
+            CpuCtrl2::from_bits_truncate(vmcs.read32(SECONDARY_VM_EXEC_CONTROL))
+                .contains(CpuCtrl2::UNRESTRICTED_GUEST);
+        if !cr0_is_valid(cr0.bits(), is_unrestricted_guest) {
             return Err(RvmError::BadState);
         }
         vmcs.writeXX(GUEST_CR0, cr0.bits() as usize);
@@ -363,10 +359,7 @@ impl Vcpu {
             (Cr0Flags::NUMERIC_ERROR | Cr0Flags::NOT_WRITE_THROUGH | Cr0Flags::CACHE_DISABLE).bits()
                 as usize,
         );
-        vmcs.writeXX(
-            CR0_READ_SHADOW,
-            (Cr0Flags::NUMERIC_ERROR | Cr0Flags::CACHE_DISABLE).bits() as usize,
-        ); // TODO: ET bit
+        vmcs.writeXX(CR0_READ_SHADOW, Cr0Flags::CACHE_DISABLE.bits() as usize); // TODO: ET bit
 
         // Setup CR4
         // Enable the PAE bit on the BSP for 64-bit paging.

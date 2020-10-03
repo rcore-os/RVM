@@ -491,7 +491,7 @@ bitflags! {
         /// Other event
         const TYPE_OTHER                = 7 << 8;
         /// Deliver error code
-        const ERROR_CODE                = 1 << 12;
+        const ERROR_CODE                = 1 << 11;
         /// Valid
         const VALID                     = 1 << 31;
     }

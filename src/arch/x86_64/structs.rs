@@ -238,7 +238,7 @@ impl VmmGlobalState {
 
         // Check control registers are in a VMX-friendly state.
         let cr0 = Cr0::read();
-        if !cr0_is_valid(cr0.bits()) {
+        if !cr0_is_valid(cr0.bits(), false) {
             return Err(RvmError::BadState);
         }
         let cr4 = Cr4::read() | Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS;
