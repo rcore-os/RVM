@@ -1,0 +1,14 @@
+[package]
+name = "rvm-ko"
+version = "0.1.0"
+authors = ["Yuekai Jia <equation618@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+log = "0.4"
+# rvm = { path = "../../.." }

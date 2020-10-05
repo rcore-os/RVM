@@ -4,20 +4,24 @@
 #include <linux/module.h>
 
 #include <rvm.h>
+#include <rust/extern.h>
 
 static int rvm_open(struct inode* inode, struct file* file) {
     pr_info("[RVM] rvm_open\n");
+    file->private_data = new_rvm_dev();
     return 0;
 }
 
 static int rvm_release(struct inode* inode, struct file* file) {
     pr_info("[RVM] rvm_release\n");
+    free_rvm_dev(file->private_data);
+    file->private_data = 0;
     return 0;
 }
 
 static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) {
     pr_info("[RVM] rvm_ioctl %x %lx\n", ioctl, arg);
-    return -2;
+    return -ENOSYS;
 }
 
 static const struct file_operations rvm_fops = {
@@ -29,7 +33,7 @@ static const struct file_operations rvm_fops = {
 };
 
 struct miscdevice rvm_device = {
-    .minor = 255,
+    .minor = MISC_DYNAMIC_MINOR,
     .name = "rvm",
     .fops = &rvm_fops,
 };
@@ -42,6 +46,8 @@ static int __init rvm_init(void) {
     }
 
     pr_info("[RVM] module_init\n");
+    rvm_init_logger();
+    hello();
     return 0;
 }
 
@@ -55,5 +61,5 @@ module_exit(rvm_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Yuekai Jia");
-MODULE_DESCRIPTION("Rcore Virtual Machine.");
+MODULE_DESCRIPTION("Rcore Virtual Machine");
 MODULE_VERSION("0.1.0");
