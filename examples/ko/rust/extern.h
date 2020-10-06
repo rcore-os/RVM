@@ -5,6 +5,8 @@
 
 extern void rvm_init_logger(void);
 
+extern bool check_hypervisor_feature(void);
+
 extern void* new_rvm_dev(void);
 extern void free_rvm_dev(const void* rvm_dev);
 

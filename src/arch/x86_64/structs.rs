@@ -164,6 +164,15 @@ impl VmmGlobalState {
             return Err(RvmError::NotSupported);
         }
 
+        let cpu_id = raw_cpuid::CpuId::new()
+            .get_feature_info()
+            .unwrap()
+            .initial_local_apic_id();
+        if cpu_id != 0 {
+            warn!("[RVM] multiprocessor is unsupported");
+            return Err(RvmError::NotSupported);
+        }
+
         if self.num_guests == 0 {
             // TODO: support multiple cpu
             let num_cpus = 1;
@@ -197,6 +206,12 @@ impl VmmGlobalState {
     }
 
     fn vmxon_task(&mut self, cpu_num: usize) -> RvmResult {
+        let mut cr4 = Cr4::read();
+        if cr4.contains(Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS) {
+            warn!("[RVM] VMX is already turned on");
+            return Err(RvmError::BadState);
+        }
+
         let page = &mut self.vmxon_pages[cpu_num];
         let vmx_basic = VmxBasic::read();
 
@@ -241,7 +256,7 @@ impl VmmGlobalState {
         if !cr0_is_valid(cr0.bits(), false) {
             return Err(RvmError::BadState);
         }
-        let cr4 = Cr4::read() | Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS;
+        cr4 |= Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS;
         if !cr4_is_valid(cr4.bits()) {
             return Err(RvmError::BadState);
         }
@@ -273,6 +288,7 @@ impl VmmGlobalState {
             }
             // Disable VMX.
             Cr4::update(|cr4| cr4.remove(Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS));
+            info!("[RVM] successed to turn off VMX");
         }
     }
 }

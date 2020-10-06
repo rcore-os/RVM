@@ -11,4 +11,5 @@ crate-type = ["staticlib"]
 
 [dependencies]
 log = "0.4"
-# rvm = { path = "../../.." }
+spin = "0.5"
+rvm = { path = "../../.." }

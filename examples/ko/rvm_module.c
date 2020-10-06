@@ -7,6 +7,14 @@
 #include <rust/extern.h>
 #include <rvm.h>
 
+extern void* __phys_to_virt(phys_addr_t address) {
+    return phys_to_virt(address);
+}
+
+extern phys_addr_t __virt_to_phys(volatile void *address) {
+    return virt_to_phys(address);
+}
+
 static int rvm_open(struct inode* inode, struct file* file) {
     pr_info("[RVM] rvm_open\n");
     file->private_data = new_rvm_dev();
@@ -53,7 +61,12 @@ struct miscdevice rvm_device = {
 };
 
 static int __init rvm_init(void) {
-    int err = misc_register(&rvm_device);
+    int err;
+    if (!check_hypervisor_feature()) {
+        pr_err("[RVM] no hardware support\n");
+        return -ENOSYS;
+    }
+    err = misc_register(&rvm_device);
     if (err) {
         pr_err("[RVM] cannot register misc device\n");
         return err;

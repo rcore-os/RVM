@@ -19,10 +19,14 @@ pub mod ctypes {
 }
 use ctypes::*;
 
+pub const PAGE_SIZE: usize = 0x1000;
 pub const GFP_KERNEL: c_uint = 0xCC0;
 
 extern "C" {
     pub fn krealloc(p: *const c_void, new_size: c_size_t, flags: c_uint) -> *mut c_void;
     pub fn kfree(ptr: *const c_void);
     pub fn printk(fmt: *const c_char) -> c_int;
+
+    pub fn __phys_to_virt(address: c_size_t) -> *mut c_void;
+    pub fn __virt_to_phys(address: *mut c_void) -> c_size_t;
 }
