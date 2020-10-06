@@ -2,9 +2,10 @@
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
+#include <linux/uaccess.h>
 
-#include <rvm.h>
 #include <rust/extern.h>
+#include <rvm.h>
 
 static int rvm_open(struct inode* inode, struct file* file) {
     pr_info("[RVM] rvm_open\n");
@@ -15,13 +16,26 @@ static int rvm_open(struct inode* inode, struct file* file) {
 static int rvm_release(struct inode* inode, struct file* file) {
     pr_info("[RVM] rvm_release\n");
     free_rvm_dev(file->private_data);
-    file->private_data = 0;
+    file->private_data = NULL;
     return 0;
 }
 
 static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) {
+    void* rvm_dev = filp->private_data;
+    void __user* argp = (void __user*)arg;
+
     pr_info("[RVM] rvm_ioctl %x %lx\n", ioctl, arg);
-    return -ENOSYS;
+    switch (ioctl) {
+    case RVM_GUEST_CREATE:
+        return rvm_guest_create(rvm_dev);
+    case RVM_VCPU_CREATE: {
+        struct rvm_vcpu_create_args args;
+        copy_from_user(&args, argp, sizeof(args));
+        return rvm_vcpu_create(rvm_dev, args.vmid, args.entry);
+    }
+    default:
+        return -ENOSYS;
+    }
 }
 
 static const struct file_operations rvm_fops = {
@@ -47,7 +61,6 @@ static int __init rvm_init(void) {
 
     pr_info("[RVM] module_init\n");
     rvm_init_logger();
-    hello();
     return 0;
 }
 

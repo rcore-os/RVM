@@ -6,10 +6,11 @@ extern crate log;
 #[macro_use]
 extern crate alloc;
 
-pub mod ffi;
+mod ffi;
 #[macro_use]
-pub mod logging;
-pub mod rvm;
+mod logging;
+mod error;
+mod rvm;
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::panic::PanicInfo;
