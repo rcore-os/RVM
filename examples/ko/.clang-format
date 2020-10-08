@@ -2,8 +2,7 @@
 Language: Cpp
 BasedOnStyle: LLVM
 IndentWidth: 4
-ColumnLimit: 120
-AllowShortIfStatementsOnASingleLine: true
+ColumnLimit: 100
 AllowShortBlocksOnASingleLine: Empty
 AlignConsecutiveMacros: true
 PointerAlignment: Left

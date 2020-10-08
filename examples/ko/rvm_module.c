@@ -1,19 +1,18 @@
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
+#include <linux/mm.h>
+#include <linux/mman.h>
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <linux/uaccess.h>
 
 #include <rust/extern.h>
 #include <rvm.h>
 
-extern void* __phys_to_virt(phys_addr_t address) {
-    return phys_to_virt(address);
-}
-
-extern phys_addr_t __virt_to_phys(volatile void *address) {
-    return virt_to_phys(address);
-}
+extern void* __phys_to_virt(phys_addr_t address) { return phys_to_virt(address); }
+extern phys_addr_t __virt_to_phys(volatile void* address) { return virt_to_phys(address); }
+extern void __BUG(void) { BUG(); }
 
 static int rvm_open(struct inode* inode, struct file* file) {
     pr_info("[RVM] rvm_open\n");
@@ -38,8 +37,11 @@ static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) 
         return rvm_guest_create(rvm_dev);
     case RVM_VCPU_CREATE: {
         struct rvm_vcpu_create_args args;
-        copy_from_user(&args, argp, sizeof(args));
-        return rvm_vcpu_create(rvm_dev, args.vmid, args.entry);
+        if (copy_from_user(&args, argp, sizeof(args)))
+            return -EFAULT;
+        if (args.vmid != 0)
+            return -EINVAL;
+        return rvm_vcpu_create(rvm_dev, args.entry);
     }
     default:
         return -ENOSYS;

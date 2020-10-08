@@ -18,7 +18,8 @@ use core::panic::PanicInfo;
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     error!("{}", info);
-    loop {}
+    unsafe { ffi::__BUG() };
+    unreachable!()
 }
 
 struct KernelAllocator;

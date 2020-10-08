@@ -20,13 +20,13 @@ impl From<RvmError> for KernelError {
     }
 }
 
-const MAX_GUEST_NUM: usize = 32;
-const MAX_VCPU_NUM: usize = 32;
+const MAX_VCPU_NUM_PER_FILE: usize = 32;
 
 #[repr(C)]
 #[derive(Debug)]
 struct RvmDev {
-    guests: Vec<Arc<Guest>>,
+    guest: Option<Arc<Guest>>,
+    gpm: Option<Arc<DefaultGuestPhysMemorySet>>,
     vcpus: Vec<Mutex<Vcpu>>,
 }
 
@@ -42,37 +42,40 @@ impl RvmDev {
     fn new() -> Self {
         info!("NEW");
         Self {
-            guests: Vec::new(),
+            guest: None,
+            gpm: None,
             vcpus: Vec::new(),
         }
     }
 
     fn guest_create(&mut self) -> KernelResult {
-        let vmid = self.guests.len() + 1;
-        if vmid > MAX_GUEST_NUM {
-            warn!("[RVM] too many guests (maximum is {})", MAX_GUEST_NUM);
-            return Err(KernelError::ENOMEM);
+        if self.guest.is_some() {
+            warn!("[RVM] guest exists");
+            return Err(KernelError::EBUSY);
         }
         let gpm = DefaultGuestPhysMemorySet::new();
-        let guest = Guest::new(gpm)?;
-        self.guests.push(guest);
-        Ok(vmid)
+        self.guest = Some(Guest::new(gpm.clone())?);
+        self.gpm = Some(gpm.clone());
+        Ok(0)
     }
 
-    fn vcpu_create(&mut self, vmid: usize, entry: u64) -> KernelResult {
-        if vmid == 0 || vmid > self.guests.len() {
-            warn!("[RVM] invalid vmid {}", vmid);
-            return Err(KernelError::EINVAL);
+    fn vcpu_create(&mut self, entry: u64) -> KernelResult {
+        if let Some(guest) = &self.guest {
+            let vcpu_id = self.vcpus.len() + 1;
+            if vcpu_id > MAX_VCPU_NUM_PER_FILE {
+                warn!(
+                    "[RVM] too many vcpus (maximum is {})",
+                    MAX_VCPU_NUM_PER_FILE
+                );
+                return Err(KernelError::ENOMEM);
+            }
+            let vcpu = Mutex::new(Vcpu::new(entry, guest.clone())?);
+            self.vcpus.push(vcpu);
+            Ok(vcpu_id)
+        } else {
+            warn!("[RVM] guest is not created");
+            Err(KernelError::EINVAL)
         }
-        let vcpu_id = self.vcpus.len() + 1;
-        if vcpu_id > MAX_VCPU_NUM {
-            warn!("[RVM] too many vcpus (maximum is {})", MAX_VCPU_NUM);
-            return Err(KernelError::ENOMEM);
-        }
-        let guest = self.guests[vmid - 1].clone();
-        let vcpu = Mutex::new(Vcpu::new(entry, guest)?);
-        self.vcpus.push(vcpu);
-        Ok(vcpu_id)
     }
 }
 
@@ -104,29 +107,21 @@ unsafe extern "C" fn rvm_guest_create(rvm_dev: *mut c_void) -> c_int {
 }
 
 #[no_mangle]
-unsafe extern "C" fn rvm_vcpu_create(
-    rvm_dev: *mut c_void,
-    vmid: c_ushort,
-    entry: c_ulong,
-) -> c_int {
+unsafe extern "C" fn rvm_vcpu_create(rvm_dev: *mut c_void, entry: c_ulong) -> c_int {
     let dev = RvmDev::from_raw_mut(rvm_dev);
-    retval(dev.vcpu_create(vmid as _, entry))
+    retval(dev.vcpu_create(entry))
 }
 
 mod rvm_extern_fn {
     use crate::ffi::*;
     #[rvm::extern_fn(alloc_frame)]
     unsafe fn rvm_alloc_frame() -> Option<usize> {
-        Some(__virt_to_phys(krealloc(
-            core::ptr::null(),
-            PAGE_SIZE,
-            GFP_KERNEL,
-        )))
+        Some(__virt_to_phys(__get_free_pages(GFP_KERNEL, 0) as _))
     }
 
     #[rvm::extern_fn(dealloc_frame)]
     unsafe fn rvm_dealloc_frame(paddr: usize) {
-        kfree(__phys_to_virt(paddr))
+        free_pages(__phys_to_virt(paddr) as _, 0)
     }
 
     #[rvm::extern_fn(phys_to_virt)]

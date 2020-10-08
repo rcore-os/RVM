@@ -96,8 +96,9 @@ struct rvm_exit_packet {
 
 struct rvm_guest_add_memory_region_args {
     uint16_t vmid;
-    uint64_t guest_start_paddr;
+    uint64_t guest_phys_addr;
     uint64_t memory_size;
+    void* userspace_addr;
 };
 struct rvm_guest_set_trap_args {
     uint16_t vmid;

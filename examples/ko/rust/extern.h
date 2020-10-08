@@ -11,6 +11,6 @@ extern void* new_rvm_dev(void);
 extern void free_rvm_dev(const void* rvm_dev);
 
 extern int rvm_guest_create(const void* rvm_dev);
-extern int rvm_vcpu_create(const void* rvm_dev, uint16_t vmid, uint64_t entry);
+extern int rvm_vcpu_create(const void* rvm_dev, uint64_t entry);
 
 #endif // RUST_EXTERN_H
