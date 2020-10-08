@@ -30,11 +30,36 @@ static int rvm_release(struct inode* inode, struct file* file) {
 static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) {
     void* rvm_dev = filp->private_data;
     void __user* argp = (void __user*)arg;
+    int ret;
 
     pr_info("[RVM] rvm_ioctl %x %lx\n", ioctl, arg);
     switch (ioctl) {
     case RVM_GUEST_CREATE:
         return rvm_guest_create(rvm_dev);
+    case RVM_GUEST_ADD_MEMORY_REGION: {
+        struct rvm_guest_add_memory_region_args args;
+        void* hva;
+
+        if (copy_from_user(&args, argp, sizeof(args)))
+            return -EFAULT;
+        if (args.vmid != 0)
+            return -EINVAL;
+
+        hva = (void*)vm_mmap(filp, 0, args.memory_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                             args.guest_phys_addr);
+        if (IS_ERR(hva))
+            return PTR_ERR(hva);
+
+        ret = rvm_guest_add_memory_region(rvm_dev, args.guest_phys_addr, args.memory_size);
+        if (ret < 0) {
+            vm_munmap((unsigned long)hva, args.memory_size);
+            return ret;
+        }
+
+        args.userspace_addr = hva;
+        copy_to_user(argp, &args, sizeof(args));
+        return 0;
+    }
     case RVM_VCPU_CREATE: {
         struct rvm_vcpu_create_args args;
         if (copy_from_user(&args, argp, sizeof(args)))
@@ -48,12 +73,37 @@ static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) 
     }
 }
 
+static vm_fault_t rvm_user_vm_fault(struct vm_fault* vmf) {
+    void* rvm_dev = vmf->vma->vm_file->private_data;
+    uint64_t guest_phys_addr = vmf->pgoff << PAGE_SHIFT;
+    struct page* page;
+
+    phys_addr_t page_pa = rvm_gpa_to_hpa(rvm_dev, guest_phys_addr, true);
+    if (IS_ERR((void*)page_pa))
+        return PTR_ERR((void*)page_pa);
+
+    page = pfn_to_page(page_pa >> PAGE_SHIFT);
+    get_page(page);
+    vmf->page = page;
+    return 0;
+}
+
+static const struct vm_operations_struct rvm_user_vm_ops = {
+    .fault = rvm_user_vm_fault,
+};
+
+static int rvm_mmap(struct file* filp, struct vm_area_struct* vma) {
+    vma->vm_ops = &rvm_user_vm_ops;
+    return 0;
+}
+
 static const struct file_operations rvm_fops = {
     .owner = THIS_MODULE,
     .open = rvm_open,
     .release = rvm_release,
     .unlocked_ioctl = rvm_ioctl,
     .llseek = no_llseek,
+    .mmap = rvm_mmap,
 };
 
 struct miscdevice rvm_device = {
