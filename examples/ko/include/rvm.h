@@ -113,7 +113,7 @@ struct rvm_vcpu_create_args {
     uint64_t entry;
 };
 
-struct rvm_vcpu_resmue_args {
+struct rvm_vcpu_resume_args {
     uint16_t vcpu_id;
     struct rvm_exit_packet packet;
 };

@@ -60,6 +60,14 @@ static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) 
         copy_to_user(argp, &args, sizeof(args));
         return 0;
     }
+    case RVM_GUEST_SET_TRAP: {
+        struct rvm_guest_set_trap_args args;
+        if (copy_from_user(&args, argp, sizeof(args)))
+            return -EFAULT;
+        if (args.vmid != 0)
+            return -EINVAL;
+        return rvm_guest_set_trap(rvm_dev, args.kind, args.addr, args.size, args.key);
+    }
     case RVM_VCPU_CREATE: {
         struct rvm_vcpu_create_args args;
         if (copy_from_user(&args, argp, sizeof(args)))
@@ -67,6 +75,18 @@ static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) 
         if (args.vmid != 0)
             return -EINVAL;
         return rvm_vcpu_create(rvm_dev, args.entry);
+    }
+    case RVM_VCPU_RESUME: {
+        struct rvm_vcpu_resume_args args;
+        if (copy_from_user(&args, argp, sizeof(args)))
+            return -EFAULT;
+
+        ret = rvm_vcpu_resume(rvm_dev, args.vcpu_id, &args.packet);
+        if (ret < 0)
+            return ret;
+
+        copy_to_user(argp, &args, sizeof(args));
+        return 0;
     }
     default:
         return -ENOSYS;
@@ -79,8 +99,8 @@ static vm_fault_t rvm_user_vm_fault(struct vm_fault* vmf) {
     struct page* page;
 
     phys_addr_t page_pa = rvm_gpa_to_hpa(rvm_dev, guest_phys_addr, true);
-    if (IS_ERR((void*)page_pa))
-        return PTR_ERR((void*)page_pa);
+    if (page_pa == 0)
+        return VM_FAULT_SIGBUS;
 
     page = pfn_to_page(page_pa >> PAGE_SHIFT);
     get_page(page);

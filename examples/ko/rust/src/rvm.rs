@@ -1,7 +1,9 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::convert::TryInto;
 use spin::Mutex;
 
-use rvm::{DefaultGuestPhysMemorySet, Guest, GuestMemoryAttr, RvmError, RvmPageTable, Vcpu};
+use rvm::{DefaultGuestPhysMemorySet, GuestMemoryAttr, RvmExitPacket, RvmPageTable};
+use rvm::{Guest, RvmError, Vcpu};
 
 use crate::error::{retval, KernelError, KernelResult};
 use crate::ffi::ctypes::*;
@@ -69,6 +71,16 @@ impl RvmDev {
         }
     }
 
+    fn guest_set_trap(&self, kind: u32, addr: usize, size: usize, key: u64) -> KernelResult {
+        if let Some(guest) = &self.guest {
+            guest.set_trap(kind.try_into()?, addr, size, None, key)?;
+            Ok(0)
+        } else {
+            warn!("[RVM] guest is not created");
+            Err(KernelError::EINVAL)
+        }
+    }
+
     fn vcpu_create(&mut self, entry: u64) -> KernelResult {
         if let Some(guest) = &self.guest {
             let vcpu_id = self.vcpus.len() + 1;
@@ -88,21 +100,33 @@ impl RvmDev {
         }
     }
 
-    fn gpa_to_hpa(&self, gpaddr: usize, alloc: bool) -> KernelResult {
+    fn vcpu_resume(&self, vcpu_id: usize, packet: &mut RvmExitPacket) -> KernelResult {
+        if vcpu_id == 0 || vcpu_id > self.vcpus.len() {
+            warn!("[RVM] invalid vcpu id {}", vcpu_id);
+            return Err(KernelError::EINVAL);
+        }
+        *packet = self.vcpus[vcpu_id - 1].lock().resume()?;
+        Ok(0)
+    }
+
+    fn gpa_to_hpa(&self, gpaddr: usize, alloc: bool) -> usize {
         if let Some(gpm) = &self.gpm {
             let mut rvm_pt = gpm.rvm_page_table.lock();
             let mut target = rvm_pt.query(gpaddr).unwrap_or(0);
             if target == 0 && alloc {
-                target =
-                    unsafe { rvm_extern_fn::rvm_alloc_frame() }.expect("failed to alloc frame");
+                unsafe {
+                    target = rvm_extern_fn::rvm_alloc_frame().expect("failed to alloc frame");
+                    let vaddr = crate::ffi::__phys_to_virt(target);
+                    core::ptr::write_bytes(vaddr as *mut u8, 0, crate::ffi::PAGE_SIZE);
+                }
                 rvm_pt
                     .map(gpaddr, target, GuestMemoryAttr::default())
                     .expect("failed to create GPA -> HPA mapping");
             }
-            Ok(target)
+            target
         } else {
             warn!("[RVM] guest is not created");
-            Err(KernelError::EINVAL)
+            0
         }
     }
 }
@@ -145,9 +169,31 @@ unsafe extern "C" fn rvm_guest_add_memory_region(
 }
 
 #[no_mangle]
+unsafe extern "C" fn rvm_guest_set_trap(
+    rvm_dev: *mut c_void,
+    kind: c_uint,
+    addr: c_ulong,
+    size: c_ulong,
+    key: c_ulong,
+) -> c_int {
+    let dev = RvmDev::from_raw(rvm_dev);
+    retval(dev.guest_set_trap(kind, addr as _, size as _, key))
+}
+
+#[no_mangle]
 unsafe extern "C" fn rvm_vcpu_create(rvm_dev: *mut c_void, entry: c_ulong) -> c_int {
     let dev = RvmDev::from_raw_mut(rvm_dev);
     retval(dev.vcpu_create(entry))
+}
+
+#[no_mangle]
+unsafe extern "C" fn rvm_vcpu_resume(
+    rvm_dev: *mut c_void,
+    vcpu_id: c_ushort,
+    packet: *mut RvmExitPacket,
+) -> c_int {
+    let dev = RvmDev::from_raw_mut(rvm_dev);
+    retval(dev.vcpu_resume(vcpu_id as _, &mut *packet))
 }
 
 #[no_mangle]
@@ -155,9 +201,9 @@ unsafe extern "C" fn rvm_gpa_to_hpa(
     rvm_dev: *mut c_void,
     guest_phys_addr: c_ulong,
     alloc: bool,
-) -> c_int {
+) -> c_ulong {
     let dev = RvmDev::from_raw(rvm_dev);
-    retval(dev.gpa_to_hpa(guest_phys_addr as _, alloc))
+    dev.gpa_to_hpa(guest_phys_addr as _, alloc) as _
 }
 
 mod rvm_extern_fn {
@@ -175,11 +221,5 @@ mod rvm_extern_fn {
     #[rvm::extern_fn(phys_to_virt)]
     pub unsafe fn rvm_phys_to_virt(paddr: usize) -> usize {
         __phys_to_virt(paddr) as usize
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[rvm::extern_fn(x86_all_traps_handler_addr)]
-    pub unsafe fn rvm_x86_all_traps_handler_addr() -> usize {
-        0
     }
 }
