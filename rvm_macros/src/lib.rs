@@ -5,7 +5,6 @@ const ALLOWED_FN_LIST: &[&str] = &[
     "alloc_frame",
     "dealloc_frame",
     "phys_to_virt",
-    "x86_all_traps_handler_addr",
 ];
 
 #[proc_macro_attribute]

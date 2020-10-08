@@ -17,7 +17,7 @@ use bit_field::BitField;
 use core::fmt;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
-use x86::{bits64::vmx, msr};
+use x86::{bits64::vmx, dtables, msr};
 use x86_64::{
     registers::control::{Cr0, Cr0Flags, Cr4, Cr4Flags},
     registers::model_specific::{Efer, EferFlags},
@@ -110,6 +110,8 @@ impl GuestState {
             RIP: {:#x?}\n\
             RSP: {:#x?}\n\
             RFLAGS: {:#x?}\n\
+            CS_SELECTOR: {:#x?}\n\
+            CS_BASE: {:#x?}\n\
             CR0: {:#x?}\n\
             CR3: {:#x?}\n\
             CR4: {:#x?}\n\
@@ -117,6 +119,8 @@ impl GuestState {
             vmcs.readXX(GUEST_RIP),
             vmcs.readXX(GUEST_RSP),
             RFlags::from_bits_truncate(vmcs.readXX(GUEST_RFLAGS) as u64),
+            vmcs.read16(GUEST_CS_SELECTOR),
+            vmcs.readXX(GUEST_CS_BASE),
             Cr0Flags::from_bits_truncate(vmcs.readXX(GUEST_CR0) as u64),
             vmcs.readXX(GUEST_CR3),
             Cr4Flags::from_bits_truncate(vmcs.readXX(GUEST_CR4) as u64),
@@ -137,13 +141,17 @@ struct VmxState {
 /// Store the interruption state/virtual timer.
 #[derive(Debug)]
 pub struct InterruptState {
+    pub host_idt_base: usize,
     pub timer: PitTimer,
     pub controller: InterruptController,
 }
 
 impl InterruptState {
     fn new() -> Self {
+        let mut idt = dtables::DescriptorTablePointer::new(&0u128);
+        unsafe { asm!("sidt [{}]", in(reg) &mut idt) };
         Self {
+            host_idt_base: idt.base as usize,
             timer: PitTimer::default(),
             controller: InterruptController::new(u8::MAX as usize),
         }
@@ -307,11 +315,10 @@ impl Vcpu {
         vmcs.writeXX(HOST_GS_BASE, Msr::new(msr::IA32_GS_BASE).read() as usize);
         vmcs.writeXX(HOST_TR_BASE, tr_base(tr) as usize);
 
-        let mut dtp = x86::dtables::DescriptorTablePointer::new(&0u64);
-        llvm_asm!("sgdt ($0)" :: "r"(&mut dtp) : "memory" : "volatile");
-        vmcs.writeXX(HOST_GDTR_BASE, dtp.base as usize);
-        llvm_asm!("sidt ($0)" :: "r"(&mut dtp) : "memory" : "volatile");
-        vmcs.writeXX(HOST_IDTR_BASE, dtp.base as usize);
+        let mut gdt = dtables::DescriptorTablePointer::new(&0u64);
+        asm!("sgdt [{}]", in(reg) &mut gdt);
+        vmcs.writeXX(HOST_GDTR_BASE, gdt.base as usize);
+        vmcs.writeXX(HOST_IDTR_BASE, self.interrupt_state.host_idt_base);
 
         vmcs.writeXX(HOST_IA32_SYSENTER_ESP, 0);
         vmcs.writeXX(HOST_IA32_SYSENTER_EIP, 0);
