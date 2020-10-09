@@ -2,8 +2,8 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::convert::TryInto;
 use spin::Mutex;
 
-use rvm::{DefaultGuestPhysMemorySet, GuestMemoryAttr, RvmExitPacket, RvmPageTable};
-use rvm::{Guest, RvmError, Vcpu};
+use rvm::{DefaultGuestPhysMemorySet, GuestMemoryAttr, RvmPageTable};
+use rvm::{Guest, RvmError, RvmExitPacket, Vcpu, VcpuIo, VcpuState};
 
 use crate::error::{retval, KernelError, KernelResult};
 use crate::ffi::ctypes::*;
@@ -109,6 +109,33 @@ impl RvmDev {
         Ok(0)
     }
 
+    fn vcpu_read_state(&self, vcpu_id: usize, state: &mut VcpuState) -> KernelResult {
+        if vcpu_id == 0 || vcpu_id > self.vcpus.len() {
+            warn!("[RVM] invalid vcpu id {}", vcpu_id);
+            return Err(KernelError::EINVAL);
+        }
+        *state = self.vcpus[vcpu_id - 1].lock().read_state()?;
+        Ok(0)
+    }
+
+    fn vcpu_write_state(&self, vcpu_id: usize, state: &VcpuState) -> KernelResult {
+        if vcpu_id == 0 || vcpu_id > self.vcpus.len() {
+            warn!("[RVM] invalid vcpu id {}", vcpu_id);
+            return Err(KernelError::EINVAL);
+        }
+        self.vcpus[vcpu_id - 1].lock().write_state(state)?;
+        Ok(0)
+    }
+
+    fn vcpu_write_io_state(&self, vcpu_id: usize, state: &VcpuIo) -> KernelResult {
+        if vcpu_id == 0 || vcpu_id > self.vcpus.len() {
+            warn!("[RVM] invalid vcpu id {}", vcpu_id);
+            return Err(KernelError::EINVAL);
+        }
+        self.vcpus[vcpu_id - 1].lock().write_io_state(state)?;
+        Ok(0)
+    }
+
     fn gpa_to_hpa(&self, gpaddr: usize, alloc: bool) -> usize {
         if let Some(gpm) = &self.gpm {
             let mut rvm_pt = gpm.rvm_page_table.lock();
@@ -192,8 +219,38 @@ unsafe extern "C" fn rvm_vcpu_resume(
     vcpu_id: c_ushort,
     packet: *mut RvmExitPacket,
 ) -> c_int {
-    let dev = RvmDev::from_raw_mut(rvm_dev);
+    let dev = RvmDev::from_raw(rvm_dev);
     retval(dev.vcpu_resume(vcpu_id as _, &mut *packet))
+}
+
+#[no_mangle]
+unsafe extern "C" fn rvm_vcpu_read_state(
+    rvm_dev: *mut c_void,
+    vcpu_id: c_ushort,
+    state: *mut VcpuState,
+) -> c_int {
+    let dev = RvmDev::from_raw(rvm_dev);
+    retval(dev.vcpu_read_state(vcpu_id as _, &mut *state))
+}
+
+#[no_mangle]
+unsafe extern "C" fn rvm_vcpu_write_state(
+    rvm_dev: *mut c_void,
+    vcpu_id: c_ushort,
+    state: *const VcpuState,
+) -> c_int {
+    let dev = RvmDev::from_raw_mut(rvm_dev);
+    retval(dev.vcpu_write_state(vcpu_id as _, &*state))
+}
+
+#[no_mangle]
+unsafe extern "C" fn rvm_vcpu_write_io_state(
+    rvm_dev: *mut c_void,
+    vcpu_id: c_ushort,
+    state: *const VcpuIo,
+) -> c_int {
+    let dev = RvmDev::from_raw_mut(rvm_dev);
+    retval(dev.vcpu_write_io_state(vcpu_id as _, &*state))
 }
 
 #[no_mangle]

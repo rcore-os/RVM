@@ -52,7 +52,15 @@ struct rvm_vcpu_state {
     uint64_t rflags;
 };
 
-typedef struct rvm_io_value rvm_vcpu_io;
+struct rvm_vcpu_io {
+    uint8_t access_size;
+    union {
+        uint8_t u8;
+        uint16_t u16;
+        uint32_t u32;
+        uint8_t buf[4];
+    };
+};
 
 struct rvm_io_value {
     uint8_t access_size;

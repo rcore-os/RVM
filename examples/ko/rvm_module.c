@@ -32,7 +32,6 @@ static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) 
     void __user* argp = (void __user*)arg;
     int ret;
 
-    pr_info("[RVM] rvm_ioctl %x %lx\n", ioctl, arg);
     switch (ioctl) {
     case RVM_GUEST_CREATE:
         return rvm_guest_create(rvm_dev);
@@ -88,8 +87,49 @@ static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) 
         copy_to_user(argp, &args, sizeof(args));
         return 0;
     }
+    case RVM_VCPU_READ_STATE: {
+        struct rvm_vcpu_state_args args;
+        struct rvm_vcpu_state state;
+        if (copy_from_user(&args, argp, sizeof(args)))
+            return -EFAULT;
+        if (args.kind != RVM_VCPU_STATE || args.buf_size != sizeof(state))
+            return -EINVAL;
+
+        ret = rvm_vcpu_read_state(rvm_dev, args.vcpu_id, &state);
+        if (ret < 0)
+            return ret;
+
+        copy_to_user(args.vcpu_state_ptr, &state, sizeof(state));
+        return 0;
+    }
+    case RVM_VCPU_WRITE_STATE: {
+        struct rvm_vcpu_state_args args;
+        if (copy_from_user(&args, argp, sizeof(args)))
+            return -EFAULT;
+
+        switch (args.kind) {
+        case RVM_VCPU_STATE: {
+            struct rvm_vcpu_state state;
+            if (args.buf_size != sizeof(state))
+                return -EINVAL;
+            if (copy_from_user(&state, args.vcpu_state_ptr, sizeof(state)))
+                return -EFAULT;
+            return rvm_vcpu_write_state(rvm_dev, args.vcpu_id, &state);
+        }
+        case RVM_VCPU_IO: {
+            struct rvm_vcpu_io state;
+            if (args.buf_size != sizeof(state))
+                return -EINVAL;
+            if (copy_from_user(&state, args.vcpu_io_ptr, sizeof(state)))
+                return -EFAULT;
+            return rvm_vcpu_write_io_state(rvm_dev, args.vcpu_id, &state);
+        }
+        default:
+            return -EINVAL;
+        }
+    }
     default:
-        return -ENOSYS;
+        return -EINVAL;
     }
 }
 
