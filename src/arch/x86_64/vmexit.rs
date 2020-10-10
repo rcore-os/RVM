@@ -164,14 +164,15 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
 
     unsafe { manual_trap(info.vector, interrupt_state) };
 
-    use super::consts as int_num;
-    match info.vector - int_num::IRQ0 {
-        int_num::Timer => interrupt_state.timer_irq(),
-        int_num::COM1 => interrupt_state
+    use super::consts::{COM1, IRQ0};
+    if crate::ffi::is_host_timer_interrupt(info.vector) {
+        interrupt_state.timer_irq();
+    }
+    if crate::ffi::is_host_serial_interrupt(info.vector) {
+        interrupt_state
             .controller
-            .virtual_interrupt(info.vector as usize),
-        _ => {}
-    };
+            .virtual_interrupt((IRQ0 + COM1) as usize);
+    }
 
     Ok(None)
 }

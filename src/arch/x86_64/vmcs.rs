@@ -2,6 +2,7 @@
 
 use bitflags::bitflags;
 use x86::bits64::vmx;
+use x86_64::instructions::interrupts;
 
 use self::{VmcsField32::*, VmcsField64::*};
 use super::utils::{invept, InvEptType};
@@ -569,17 +570,26 @@ impl EPTPointer {
 #[derive(Debug)]
 pub struct AutoVmcs {
     vmcs_paddr: u64,
+    saved_intpt_flag: bool,
 }
 
 impl AutoVmcs {
     pub fn new(phys_addr: u64) -> RvmResult<Self> {
-        x86_64::instructions::interrupts::disable();
+        let saved_intpt_flag = interrupts::are_enabled();
+        if saved_intpt_flag {
+            trace!("[RVM] interrupts disabled");
+            interrupts::disable();
+        }
         unsafe {
             if vmx::vmptrld(phys_addr).is_err() {
+                if saved_intpt_flag {
+                    interrupts::enable();
+                }
                 Err(RvmError::Internal)
             } else {
                 Ok(Self {
                     vmcs_paddr: phys_addr,
+                    saved_intpt_flag,
                 })
             }
         }
@@ -706,6 +716,15 @@ impl AutoVmcs {
                     field, value
                 );
             }
+        }
+    }
+}
+
+impl Drop for AutoVmcs {
+    fn drop(&mut self) {
+        if self.saved_intpt_flag {
+            trace!("[RVM] interrupts enabled");
+            interrupts::enable();
         }
     }
 }

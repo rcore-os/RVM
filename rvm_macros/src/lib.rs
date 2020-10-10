@@ -5,6 +5,8 @@ const ALLOWED_FN_LIST: &[&str] = &[
     "alloc_frame",
     "dealloc_frame",
     "phys_to_virt",
+    "is_host_timer_interrupt",
+    "is_host_serial_interrupt",
 ];
 
 #[proc_macro_attribute]

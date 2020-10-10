@@ -42,7 +42,6 @@ impl RvmDev {
     }
 
     fn new() -> Self {
-        info!("NEW");
         Self {
             guest: None,
             gpm: None,
@@ -155,12 +154,6 @@ impl RvmDev {
             warn!("[RVM] guest is not created");
             0
         }
-    }
-}
-
-impl Drop for RvmDev {
-    fn drop(&mut self) {
-        info!("DROP");
     }
 }
 
@@ -278,5 +271,18 @@ mod rvm_extern_fn {
     #[rvm::extern_fn(phys_to_virt)]
     pub unsafe fn rvm_phys_to_virt(paddr: usize) -> usize {
         __phys_to_virt(paddr) as usize
+    }
+
+    #[rvm::extern_fn(is_host_timer_interrupt)]
+    pub unsafe fn rvm_is_host_timer_interrupt(vector: u8) -> bool {
+        // See LOCAL_TIMER_VECTOR from linux: arch/x86/include/asm/irq_vectors.h
+        vector == LOCAL_TIMER_VECTOR
+    }
+
+    #[rvm::extern_fn(is_host_serial_interrupt)]
+    pub unsafe fn rvm_is_host_serial_interrupt(vector: u8) -> bool {
+        // Vectors 0x30-0x3f are used for ISA interrupts.
+        // FIXME: magic number from debugging
+        vector >= 0x34 && vector <= 0x38
     }
 }

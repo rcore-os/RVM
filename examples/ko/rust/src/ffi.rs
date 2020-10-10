@@ -22,6 +22,8 @@ use ctypes::*;
 pub const PAGE_SIZE: usize = 0x1000;
 pub const GFP_KERNEL: c_uint = 0xCC0;
 
+pub const LOCAL_TIMER_VECTOR: u8 = 0xEC;
+
 extern "C" {
     // symbols in kernel
     pub fn krealloc(p: *const c_void, new_size: c_size_t, flags: c_uint) -> *mut c_void;
