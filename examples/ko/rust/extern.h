@@ -24,6 +24,7 @@ extern int rvm_vcpu_write_state(const void* rvm_dev, uint16_t vcpu_id,
                                 const struct rvm_vcpu_state* state);
 extern int rvm_vcpu_write_io_state(const void* rvm_dev, uint16_t vcpu_id,
                                    const struct rvm_vcpu_io* state);
+extern int rvm_vcpu_interrupt(const void* rvm_dev, uint16_t vcpu_id, uint32_t vector);
 
 extern phys_addr_t rvm_gpa_to_hpa(const void* rvm_dev, uint64_t guest_phys_addr, bool alloc);
 

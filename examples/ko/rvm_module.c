@@ -128,6 +128,12 @@ static long rvm_ioctl(struct file* filp, unsigned int ioctl, unsigned long arg) 
             return -EINVAL;
         }
     }
+    case RVM_VCPU_INTERRUPT: {
+        struct rvm_vcpu_interrupt_args args;
+        if (copy_from_user(&args, argp, sizeof(args)))
+            return -EFAULT;
+        return rvm_vcpu_interrupt(rvm_dev, args.vcpu_id, args.vector);
+    }
     default:
         return -EINVAL;
     }

@@ -135,6 +135,15 @@ impl RvmDev {
         Ok(0)
     }
 
+    fn vcpu_interrupt(&self, vcpu_id: usize, vector: u32) -> KernelResult {
+        if vcpu_id == 0 || vcpu_id > self.vcpus.len() {
+            warn!("[RVM] invalid vcpu id {}", vcpu_id);
+            return Err(KernelError::EINVAL);
+        }
+        self.vcpus[vcpu_id - 1].lock().virtual_interrupt(vector)?;
+        Ok(0)
+    }
+
     fn gpa_to_hpa(&self, gpaddr: usize, alloc: bool) -> usize {
         if let Some(gpm) = &self.gpm {
             let mut rvm_pt = gpm.rvm_page_table.lock();
@@ -244,6 +253,16 @@ unsafe extern "C" fn rvm_vcpu_write_io_state(
 ) -> c_int {
     let dev = RvmDev::from_raw_mut(rvm_dev);
     retval(dev.vcpu_write_io_state(vcpu_id as _, &*state))
+}
+
+#[no_mangle]
+unsafe extern "C" fn rvm_vcpu_interrupt(
+    rvm_dev: *mut c_void,
+    vcpu_id: c_ushort,
+    vector: c_uint,
+) -> c_int {
+    let dev = RvmDev::from_raw_mut(rvm_dev);
+    retval(dev.vcpu_interrupt(vcpu_id as _, vector))
 }
 
 #[no_mangle]
