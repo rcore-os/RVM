@@ -37,8 +37,11 @@ jobs:
       with:
         command: build
         args: --all-features
-    - name: Build examples
+    - name: Build example UEFI
       run: cd examples/uefi && make build
+    - name: Build example KO
+      run: |
+        cd examples/ko && make
     - name: Build docs
       uses: actions-rs/cargo@v1
       with:

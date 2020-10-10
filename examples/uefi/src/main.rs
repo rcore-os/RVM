@@ -198,8 +198,14 @@ fn phys_to_virt(paddr: usize) -> usize {
     paddr
 }
 
-/// Do not handle external interrupts
-#[rvm::extern_fn(x86_all_traps_handler_addr)]
-fn x86_all_traps_handler_addr() -> usize {
-    0
+/// Do not inject interrupts to guest
+#[rvm::extern_fn(is_host_timer_interrupt)]
+fn rvm_is_host_timer_interrupt(_vector: u8) -> bool {
+    false
+}
+
+/// Do not inject interrupts to guest
+#[rvm::extern_fn(is_host_serial_interrupt)]
+fn rvm_is_host_serial_interrupt(_vector: u8) -> bool {
+    false
 }
