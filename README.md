@@ -55,7 +55,7 @@ RVM is used as the hypervisor module of the following OSes:
 * [rCore](https://github.com/rcore-os/rCore)
 * [zCore](https://github.com/rcore-os/zCore)
 
-It can also run in linux as a kernel module and replace the [KVM](https://www.linux-kvm.org/page/Main_Page) hypervisor to support simple guest OSes such as [uCore](https://github.com/chyyuu/os_kernel_lab/tree/master). See the [ko example](examples/ko) and [rcoore-vmm](https://github.com/rcore-os/rcore-vmm) for more details.
+It can also run in linux as a kernel module and replace the [KVM](https://www.linux-kvm.org/page/Main_Page) hypervisor to support simple guest OSes such as [uCore](https://github.com/chyyuu/os_kernel_lab/tree/master). See the [ko example](examples/ko) and [rcore-vmm](https://github.com/rcore-os/rcore-vmm) for more details.
 
 ## Documents
 
