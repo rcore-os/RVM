@@ -733,10 +733,19 @@ impl Drop for Vcpu {
     }
 }
 
-#[naked]
-#[inline(never)]
-unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> bool {
-    llvm_asm!("
+extern "sysv64" {
+    fn vmx_entry(_vmx_state: &mut VmxState) -> bool;
+    /// This is effectively the second-half of vmx_entry. When we return from a
+    /// VM exit, vmx_state argument is stored in RSP. We use this to restore the
+    /// stack and registers to the state they were in when vmx_entry was called.
+    fn vmx_exit() -> bool;
+}
+
+global_asm!(
+    "
+.intel_syntax noprefix
+.global vmx_entry
+vmx_entry:
     // Store host callee save registers, return address, and processor flags to stack.
     pushf
     push    r15
@@ -787,25 +796,17 @@ unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> bool {
     pop     r14
     pop     r15
     popf
+
+    // return true
+    mov     ax, 1
+    ret
 "
-    :
-    :
-    : "cc", "memory",
-      "rax", "rbx", "rcx", "rdx", "rdi", "rsi"
-      "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
-    : "intel", "volatile");
+);
 
-    // We will only be here if vmlaunch or vmresume failed.
-    true
-}
-
-/// This is effectively the second-half of vmx_entry. When we return from a
-/// VM exit, vmx_state argument is stored in RSP. We use this to restore the
-/// stack and registers to the state they were in when vmx_entry was called.
-#[naked]
-#[inline(never)]
-unsafe extern "sysv64" fn vmx_exit() -> bool {
-    llvm_asm!("
+global_asm!(
+    "
+.global vmx_exit
+vmx_exit:
     // Store the guest registers not covered by the VMCS. At this point,
     // vmx_state is in RSP.
     add     rsp, 18 * 8
@@ -838,13 +839,9 @@ unsafe extern "sysv64" fn vmx_exit() -> bool {
     pop     r14
     pop     r15
     popf
-"
-    :
-    :
-    : "cc", "memory",
-      "rax", "rbx", "rcx", "rdx", "rdi", "rsi"
-      "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
-    : "intel", "volatile");
 
-    false
-}
+    // Return false
+    xor     rax, rax
+    ret
+"
+);

@@ -7,10 +7,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uefi = "0.6.0"
-uefi-services = "0.3.0"
-rlibc = "1.0"
+uefi = "0.8.0"
+uefi-services = "0.5.0"
 log = "0.4"
 xmas-elf = "0.7"
-x86_64 = "0.12"
+x86_64 = "0.13.2"
 rvm = { path = "../.." }

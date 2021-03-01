@@ -2,7 +2,6 @@ MODE ?= release
 EFI := target/x86_64-unknown-uefi/$(MODE)/uefi.efi
 OVMF := OVMF.fd
 ESP := target/x86_64-unknown-uefi/$(MODE)/esp
-BUILD_ARGS := -Z build-std=core,alloc --target x86_64-unknown-uefi
 QEMU_ARGS := -net none -nographic -enable-kvm -cpu host,+vmx
 OBJDUMP := rust-objdump -print-imm-hex -x86-asm-syntax=intel
 

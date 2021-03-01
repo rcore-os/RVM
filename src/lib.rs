@@ -3,7 +3,7 @@
 #![no_std]
 #![feature(asm)]
 #![feature(llvm_asm)]
-#![feature(naked_functions)]
+#![feature(global_asm)]
 #![feature(untagged_unions)]
 #![deny(warnings)]
 

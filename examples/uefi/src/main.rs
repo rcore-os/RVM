@@ -2,12 +2,10 @@
 #![no_main]
 #![feature(asm)]
 #![feature(abi_efiapi)]
-#![feature(llvm_asm)]
 
 extern crate alloc;
 #[macro_use]
 extern crate log;
-extern crate rlibc;
 
 use alloc::sync::Arc;
 use rvm::*;
@@ -20,16 +18,14 @@ use x86_64::{
 
 unsafe extern "C" fn hypercall() {
     for i in 0..100 {
-        llvm_asm!(
-            "vmcall"
-            :
-            : "{ax}"(i),
-              "{bx}"(2),
-              "{cx}"(3),
-              "{dx}"(3),
-              "{si}"(3)
-            : "rax"
-            : "volatile");
+        asm!(
+            "vmcall",
+            inout("ax") i => _,
+            in("bx") 2,
+            in("cx") 3,
+            in("dx") 3,
+            in("si") 3,
+        );
     }
     asm!("mov qword ptr [$0xfff233], $2333");
 }
@@ -106,7 +102,7 @@ fn run_hypervisor() -> RvmResult {
     assert_eq!(packet.key, 0x2333);
     assert_eq!(unsafe { packet.inner.mmio.addr }, 0xfff233);
     assert_eq!(unsafe { packet.inner.mmio.inst_len }, 0xc);
-    assert_eq!(unsafe { packet.inner.mmio.default_operand_size }, 0x4 );
+    assert_eq!(unsafe { packet.inner.mmio.default_operand_size }, 0x4);
     assert_eq!(
         unsafe { &packet.inner.mmio.inst_buf[0..12] },
         &[0x48, 0xc7, 0x4, 0x25, 0x33, 0xf2, 0xff, 0x0, 0x1d, 0x9, 0x0, 0x0]
@@ -140,6 +136,7 @@ fn setup_tss() {
     use x86_64::structures::tss::TaskStateSegment;
     use x86_64::structures::DescriptorTablePointer;
     use x86_64::PrivilegeLevel;
+    use x86_64::VirtAddr;
 
     let tss = Box::new(TaskStateSegment::new());
     let tss: &'static _ = Box::leak(tss);
@@ -150,10 +147,11 @@ fn setup_tss() {
 
     unsafe {
         // get current GDT
-        let mut gdtp = DescriptorTablePointer { limit: 0, base: 0 };
-        asm!("sgdt [{}]", in(reg) &mut gdtp);
+        let mut gdtp = core::mem::MaybeUninit::<DescriptorTablePointer>::uninit();
+        asm!("sgdt [{}]", in(reg) gdtp.as_mut_ptr());
+        let gdtp = gdtp.assume_init();
         let entry_count = (gdtp.limit + 1) as usize / size_of::<u64>();
-        let old_gdt = core::slice::from_raw_parts(gdtp.base as *const u64, entry_count);
+        let old_gdt = core::slice::from_raw_parts(gdtp.base.as_ptr::<u64>(), entry_count);
 
         // allocate new GDT with 2 more entries
         let mut gdt = Vec::from(old_gdt);
@@ -163,7 +161,7 @@ fn setup_tss() {
         // load new GDT and TSS
         lgdt(&DescriptorTablePointer {
             limit: gdt.len() as u16 * 8 - 1,
-            base: gdt.as_ptr() as _,
+            base: VirtAddr::new(gdt.as_ptr() as u64),
         });
         load_tss(SegmentSelector::new(
             entry_count as u16,
