@@ -5,6 +5,7 @@
 #![feature(llvm_asm)]
 #![feature(global_asm)]
 #![feature(untagged_unions)]
+#![allow(clippy::upper_case_acronyms)]
 #![deny(warnings)]
 
 #[macro_use]
