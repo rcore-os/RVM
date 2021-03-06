@@ -53,6 +53,16 @@ pub struct MmioPacket {
     pub data: u64,
 }
 
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct MmioPacket {
+    pub addr: u64,
+    pub access_size: u8,
+    pub read: bool,
+    pub data: u64
+}
+
 #[repr(C)]
 pub union RvmExitPacketInnner {
     pub bell: BellPacket,
