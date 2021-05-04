@@ -6,8 +6,12 @@ use core::fmt::{Debug, Formatter, Result};
 #[derive(Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub enum RvmExitPacketKind {
+    #[cfg(target_arch = "x86_64")]
     GuestBell = 1,
+    #[cfg(target_arch = "x86_64")]
     GuestIo = 2,
+    #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+    GuestEcall = 1,
     GuestMmio = 3,
     GuestVcpu = 4,
 }
@@ -28,6 +32,18 @@ pub struct IoPacket {
     pub repeat: bool,
     pub _padding1: [u8; 2],
     pub data: [u8; 4],
+}
+
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct EcallPacket {
+    pub eid: i32,
+    pub fid: i32,
+    pub arg0: usize,
+    pub arg1: usize,
+    pub arg2: usize,
+    pub arg3: usize,
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -60,13 +76,21 @@ pub struct MmioPacket {
     pub addr: u64,
     pub access_size: u8,
     pub read: bool,
-    pub data: u64
+    pub execute: bool,
+    pub data: u64,
+    pub dstreg: u8,
+    pub extension: bool,
+    pub insn: u32,
 }
 
 #[repr(C)]
-pub union RvmExitPacketInnner {
+pub union RvmExitPacketInner {
+    #[cfg(target_arch = "x86_64")]
     pub bell: BellPacket,
+    #[cfg(target_arch = "x86_64")]
     pub io: IoPacket,
+    #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+    pub ecall: EcallPacket,
     pub mmio: MmioPacket,
 }
 
@@ -74,33 +98,45 @@ pub union RvmExitPacketInnner {
 pub struct RvmExitPacket {
     pub kind: RvmExitPacketKind,
     pub key: u64,
-    pub inner: RvmExitPacketInnner,
+    pub inner: RvmExitPacketInner,
 }
 
 impl RvmExitPacket {
+    #[cfg(target_arch = "x86_64")]
     pub fn new_bell_packet(key: u64, addr: u64) -> Self {
         Self {
             kind: RvmExitPacketKind::GuestBell,
             key,
-            inner: RvmExitPacketInnner {
+            inner: RvmExitPacketInner {
                 bell: BellPacket { addr },
             },
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
     pub fn new_io_packet(key: u64, io_packet: IoPacket) -> Self {
         Self {
             kind: RvmExitPacketKind::GuestIo,
             key,
-            inner: RvmExitPacketInnner { io: io_packet },
+            inner: RvmExitPacketInner { io: io_packet },
         }
     }
 
+    #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+    pub fn new_ecall_packet(key: u64, ecall_packet: EcallPacket) -> Self {
+        Self {
+            kind: RvmExitPacketKind::GuestEcall,
+            key,
+            inner: RvmExitPacketInner {
+                ecall: ecall_packet,
+            },
+        }
+    }
     pub fn new_mmio_packet(key: u64, mmio_packet: MmioPacket) -> Self {
         Self {
             kind: RvmExitPacketKind::GuestMmio,
             key,
-            inner: RvmExitPacketInnner { mmio: mmio_packet },
+            inner: RvmExitPacketInner { mmio: mmio_packet },
         }
     }
 }
@@ -111,8 +147,12 @@ impl Debug for RvmExitPacket {
         out.field("kind", &self.kind).field("key", &self.key);
         unsafe {
             match self.kind {
+                #[cfg(target_arch = "x86_64")]
                 RvmExitPacketKind::GuestBell => out.field("inner", &self.inner.bell),
+                #[cfg(target_arch = "x86_64")]
                 RvmExitPacketKind::GuestIo => out.field("inner", &self.inner.io),
+                #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+                RvmExitPacketKind::GuestEcall => out.field("inner", &self.inner.ecall),
                 RvmExitPacketKind::GuestMmio => out.field("inner", &self.inner.mmio),
                 _ => out.field("inner", &"Unknown"),
             };

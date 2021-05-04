@@ -24,3 +24,11 @@ pub fn check_hypervisor_feature() -> bool {
         false
     }
 }
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct VcpuIo {
+    pub access_size: u8,
+    pub _padding1: [u8; 3],
+    pub data: [u8; 4],
+}

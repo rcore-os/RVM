@@ -24,4 +24,4 @@ x86_64 = "0.11"
 raw-cpuid = "8.0"
 
 [target.'cfg(any(target_arch = "riscv32", target_arch = "riscv64"))'.dependencies]
-riscv = { path = "../riscv", features = ["inline-asm"] }
+riscv = { git = "https://github.com/rcore-riscv-hypervisor-dev/riscv.git", rev = "180c1f4", features = ["inline-asm", "hypervisor"] }

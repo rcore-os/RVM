@@ -5,9 +5,11 @@
 #![feature(llvm_asm)]
 #![feature(naked_functions)]
 #![feature(untagged_unions)]
-#![deny(warnings)]
+#![feature(global_asm)]
 
-#[macro_use]
+//#![deny(warnings)]
+
+//#[macro_use]
 extern crate alloc;
 #[macro_use]
 extern crate log;
@@ -29,8 +31,7 @@ mod memory;
 mod packet;
 mod trap_map;
 
-#[cfg(target_arch = "x86_64")]
-pub use arch::{check_hypervisor_feature, ArchRvmPageTable, Guest, Vcpu};
+pub use arch::{check_hypervisor_feature, ArchRvmPageTable, Guest, Vcpu, VcpuState};
 pub use dummy::{DefaultGuestPhysMemorySet, GuestMemoryAttr};
 pub use memory::*;
 pub use packet::*;
@@ -85,20 +86,4 @@ pub struct VcpuState {
     pub rflags: u64,
 }
 
-#[cfg(target_arch = "aarch64")]
-#[repr(C)]
-#[derive(Debug, Default)]
-pub struct VcpuState {
-    pub x: [u64; 31],
-    pub sp: u64,
-    pub cpsr: u64,
-    pub _padding1: [u8; 4],
-}
-
-#[repr(C)]
-#[derive(Debug)]
-pub struct VcpuIo {
-    pub access_size: u8,
-    pub _padding1: [u8; 3],
-    pub data: [u8; 4],
-}
+pub use arch::VcpuIo;
