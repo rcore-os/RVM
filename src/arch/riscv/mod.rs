@@ -152,7 +152,7 @@ impl Vcpu {
         use SBICall::*;
         match try_handle_sbi_call(&mut self.state.ctx) {
             SetTimer { time_value } => {
-                self.state.interrupts.timerExpire = time_value;
+                self.state.interrupts.timer_expire = time_value;
                 Ok(None)
             }
             GetSpecVersion(SBIRet { error, value }) => {
@@ -212,7 +212,7 @@ impl Vcpu {
                     arg3,
                 },
             ))),
-            _ => Ok(None),
+            //_ => Ok(None),
         }
     }
     fn handle_memory_fault(
@@ -334,7 +334,7 @@ impl Vcpu {
                 panic!("Impossible arm {:?}.", cause)
             }
         }
-        Err(RvmError::Internal)
+        //Err(RvmError::Internal)
     }
 
     pub fn write_io_state(&mut self, _state: &VcpuIo) -> RvmResult {
@@ -343,7 +343,7 @@ impl Vcpu {
 
     /// Inject a virtual interrupt.
     pub fn virtual_interrupt(&mut self, _vector: u32) -> RvmResult {
-        self.state.interrupts.hasExternalInterrupt = true;
+        self.state.interrupts.has_external_interrupt = true;
         Ok(())
     }
 
@@ -361,16 +361,16 @@ pub use runvm::{VMMContext, VMMContextPriv};
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct InterruptState {
-    pub timerExpire: u64,
-    pub hasExternalInterrupt: bool,
-    pub hasSoftwareInterrupt: bool,
+    pub timer_expire: u64,
+    pub has_external_interrupt: bool,
+    pub has_software_interrupt: bool,
 }
 impl InterruptState {
     pub fn new() -> Self {
         InterruptState {
-            timerExpire: !0,
-            hasExternalInterrupt: false,
-            hasSoftwareInterrupt: false,
+            timer_expire: !0,
+            has_external_interrupt: false,
+            has_software_interrupt: false,
         }
     }
 }
@@ -395,12 +395,12 @@ pub fn get_cycle() -> u64 {
 impl InterruptState {
     fn has_timer_expired(&self) -> bool {
         let now = get_cycle();
-        return now >= self.timerExpire;
+        return now >= self.timer_expire;
     }
     fn apply(self) {
         let mut ints = hvip::read();
-        ints.set_vssip(self.hasSoftwareInterrupt);
-        ints.set_vseip(self.hasExternalInterrupt);
+        ints.set_vssip(self.has_software_interrupt);
+        ints.set_vseip(self.has_external_interrupt);
         ints.set_vstip(self.has_timer_expired());
         unsafe { ints.write() };
     }

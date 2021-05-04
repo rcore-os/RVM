@@ -1,15 +1,15 @@
 [package]
-name = "uefi"
+name = "rvm-ko"
 version = "0.1.0"
-authors = ["Runji Wang <wangrunji0408@163.com>"]
+authors = ["Yuekai Jia <equation618@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type = ["staticlib"]
+
 [dependencies]
-uefi = "0.8.0"
-uefi-services = "0.5.0"
 log = "0.4"
-xmas-elf = "0.7"
-x86_64 = "0.13.2"
-rvm = { path = "../.." }
+spin = "0.5"
+rvm = { path = "../../.." }

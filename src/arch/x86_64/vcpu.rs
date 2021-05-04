@@ -17,7 +17,7 @@ use bit_field::BitField;
 use core::fmt;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
-use x86::{bits64::vmx, msr};
+use x86::{bits64::vmx, dtables, msr};
 use x86_64::{
     registers::control::{Cr0, Cr0Flags, Cr4, Cr4Flags},
     registers::model_specific::{Efer, EferFlags},
@@ -110,6 +110,8 @@ impl GuestState {
             RIP: {:#x?}\n\
             RSP: {:#x?}\n\
             RFLAGS: {:#x?}\n\
+            CS_SELECTOR: {:#x?}\n\
+            CS_BASE: {:#x?}\n\
             CR0: {:#x?}\n\
             CR3: {:#x?}\n\
             CR4: {:#x?}\n\
@@ -117,6 +119,8 @@ impl GuestState {
             vmcs.readXX(GUEST_RIP),
             vmcs.readXX(GUEST_RSP),
             RFlags::from_bits_truncate(vmcs.readXX(GUEST_RFLAGS) as u64),
+            vmcs.read16(GUEST_CS_SELECTOR),
+            vmcs.readXX(GUEST_CS_BASE),
             Cr0Flags::from_bits_truncate(vmcs.readXX(GUEST_CR0) as u64),
             vmcs.readXX(GUEST_CR3),
             Cr4Flags::from_bits_truncate(vmcs.readXX(GUEST_CR4) as u64),
@@ -137,13 +141,17 @@ struct VmxState {
 /// Store the interruption state/virtual timer.
 #[derive(Debug)]
 pub struct InterruptState {
+    pub host_idt_base: usize,
     pub timer: PitTimer,
     pub controller: InterruptController,
 }
 
 impl InterruptState {
     fn new() -> Self {
+        let mut idt = dtables::DescriptorTablePointer::new(&0u128);
+        unsafe { asm!("sidt [{}]", in(reg) &mut idt) };
         Self {
+            host_idt_base: idt.base as usize,
             timer: PitTimer::default(),
             controller: InterruptController::new(u8::MAX as usize),
         }
@@ -307,11 +315,10 @@ impl Vcpu {
         vmcs.writeXX(HOST_GS_BASE, Msr::new(msr::IA32_GS_BASE).read() as usize);
         vmcs.writeXX(HOST_TR_BASE, tr_base(tr) as usize);
 
-        let mut dtp = x86::dtables::DescriptorTablePointer::new(&0u64);
-        llvm_asm!("sgdt ($0)" :: "r"(&mut dtp) : "memory" : "volatile");
-        vmcs.writeXX(HOST_GDTR_BASE, dtp.base as usize);
-        llvm_asm!("sidt ($0)" :: "r"(&mut dtp) : "memory" : "volatile");
-        vmcs.writeXX(HOST_IDTR_BASE, dtp.base as usize);
+        let mut gdt = dtables::DescriptorTablePointer::new(&0u64);
+        asm!("sgdt [{}]", in(reg) &mut gdt);
+        vmcs.writeXX(HOST_GDTR_BASE, gdt.base as usize);
+        vmcs.writeXX(HOST_IDTR_BASE, self.interrupt_state.host_idt_base);
 
         vmcs.writeXX(HOST_IA32_SYSENTER_ESP, 0);
         vmcs.writeXX(HOST_IA32_SYSENTER_EIP, 0);
@@ -343,16 +350,12 @@ impl Vcpu {
             // Enable protected mode and paging on the BSP.
             cr0 |= Cr0Flags::PAGING | Cr0Flags::PROTECTED_MODE_ENABLE;
         }
-        // From Volume 3, Section 26.3.1.1: PE and PG bits of CR0 are not checked when unrestricted
-        // guest is enabled. Set both here to avoid clashing with X86_MSR_IA32_VMX_CR0_FIXED1.
-        let mut cr0_check = cr0;
+
         use SecondaryCpuBasedVmExecControls as CpuCtrl2;
-        if CpuCtrl2::from_bits_truncate(vmcs.read32(SECONDARY_VM_EXEC_CONTROL))
-            .contains(CpuCtrl2::UNRESTRICTED_GUEST)
-        {
-            cr0_check |= Cr0Flags::PAGING | Cr0Flags::PROTECTED_MODE_ENABLE;
-        }
-        if !cr0_is_valid(cr0_check.bits()) {
+        let is_unrestricted_guest =
+            CpuCtrl2::from_bits_truncate(vmcs.read32(SECONDARY_VM_EXEC_CONTROL))
+                .contains(CpuCtrl2::UNRESTRICTED_GUEST);
+        if !cr0_is_valid(cr0.bits(), is_unrestricted_guest) {
             return Err(RvmError::BadState);
         }
         vmcs.writeXX(GUEST_CR0, cr0.bits() as usize);
@@ -363,10 +366,7 @@ impl Vcpu {
             (Cr0Flags::NUMERIC_ERROR | Cr0Flags::NOT_WRITE_THROUGH | Cr0Flags::CACHE_DISABLE).bits()
                 as usize,
         );
-        vmcs.writeXX(
-            CR0_READ_SHADOW,
-            (Cr0Flags::NUMERIC_ERROR | Cr0Flags::CACHE_DISABLE).bits() as usize,
-        ); // TODO: ET bit
+        vmcs.writeXX(CR0_READ_SHADOW, Cr0Flags::CACHE_DISABLE.bits() as usize); // TODO: ET bit
 
         // Setup CR4
         // Enable the PAE bit on the BSP for 64-bit paging.
@@ -733,10 +733,19 @@ impl Drop for Vcpu {
     }
 }
 
-#[naked]
-#[inline(never)]
-unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> bool {
-    llvm_asm!("
+extern "sysv64" {
+    fn vmx_entry(_vmx_state: &mut VmxState) -> bool;
+    /// This is effectively the second-half of vmx_entry. When we return from a
+    /// VM exit, vmx_state argument is stored in RSP. We use this to restore the
+    /// stack and registers to the state they were in when vmx_entry was called.
+    fn vmx_exit() -> bool;
+}
+
+global_asm!(
+    "
+.intel_syntax noprefix
+.global vmx_entry
+vmx_entry:
     // Store host callee save registers, return address, and processor flags to stack.
     pushf
     push    r15
@@ -787,25 +796,17 @@ unsafe extern "sysv64" fn vmx_entry(_vmx_state: &mut VmxState) -> bool {
     pop     r14
     pop     r15
     popf
+
+    // return true
+    mov     ax, 1
+    ret
 "
-    :
-    :
-    : "cc", "memory",
-      "rax", "rbx", "rcx", "rdx", "rdi", "rsi"
-      "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
-    : "intel", "volatile");
+);
 
-    // We will only be here if vmlaunch or vmresume failed.
-    true
-}
-
-/// This is effectively the second-half of vmx_entry. When we return from a
-/// VM exit, vmx_state argument is stored in RSP. We use this to restore the
-/// stack and registers to the state they were in when vmx_entry was called.
-#[naked]
-#[inline(never)]
-unsafe extern "sysv64" fn vmx_exit() -> bool {
-    llvm_asm!("
+global_asm!(
+    "
+.global vmx_exit
+vmx_exit:
     // Store the guest registers not covered by the VMCS. At this point,
     // vmx_state is in RSP.
     add     rsp, 18 * 8
@@ -838,13 +839,9 @@ unsafe extern "sysv64" fn vmx_exit() -> bool {
     pop     r14
     pop     r15
     popf
-"
-    :
-    :
-    : "cc", "memory",
-      "rax", "rbx", "rcx", "rdx", "rdi", "rsi"
-      "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
-    : "intel", "volatile");
 
-    false
-}
+    // Return false
+    xor     rax, rax
+    ret
+"
+);

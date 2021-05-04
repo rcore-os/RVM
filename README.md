@@ -2,13 +2,13 @@
 
 [![CI](https://github.com/rcore-os/RVM/workflows/CI/badge.svg?branch=master)](https://github.com/rcore-os/RVM/actions)
 
-A experimental hypervisor library written in Rust to build both type-1 and type-2 hypervisors.
+An experimental hypervisor library written in Rust to build both type-1 and type-2 hypervisors.
 
 Supported architecture: x86_64 (Intel VMX).
 
 ## Basic usage
 
-See the [UEFI example](examples/uefi/src/main.rs) for more detail.
+See the [UEFI example](examples/uefi/src/main.rs) for more details.
 
 ```rust
 use rvm::*;
@@ -50,10 +50,12 @@ fn run_hypervisor() -> RvmResult {
 
 ## More examples
 
-RVM is used as the hypervisor module of the following OS:
+RVM is used as the hypervisor module of the following OSes:
 
 * [rCore](https://github.com/rcore-os/rCore)
 * [zCore](https://github.com/rcore-os/zCore)
+
+It can also run in linux as a kernel module and replace the [KVM](https://www.linux-kvm.org/page/Main_Page) hypervisor to support simple guest OSes such as [uCore](https://github.com/chyyuu/os_kernel_lab/tree/master). See the [ko example](examples/ko) and [rcore-vmm](https://github.com/rcore-os/rcore-vmm) for more details.
 
 ## Documents
 

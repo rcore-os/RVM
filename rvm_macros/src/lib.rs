@@ -7,7 +7,8 @@ const ALLOWED_FN_LIST: &[&str] = &[
     "alloc_frame_x4",
     "dealloc_frame_x4",
     "phys_to_virt",
-    "x86_all_traps_handler_addr",
+    "is_host_timer_interrupt",
+    "is_host_serial_interrupt",
     "riscv_check_hypervisor_extension",
     "riscv_trap_handler_no_frame",
 ];

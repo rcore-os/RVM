@@ -3,14 +3,18 @@
 #![no_std]
 #![feature(asm)]
 #![feature(llvm_asm)]
-#![feature(naked_functions)]
-#![feature(untagged_unions)]
 #![feature(global_asm)]
+#![feature(untagged_unions)]
+#![allow(clippy::upper_case_acronyms)]
+#![deny(warnings)]
 
-//#![deny(warnings)]
-
-//#[macro_use]
+#[cfg(target_arch = "x86_64")]
+#[macro_use]
 extern crate alloc;
+
+#[cfg(not(target_arch = "x86_64"))]
+extern crate alloc;
+
 #[macro_use]
 extern crate log;
 
@@ -26,12 +30,16 @@ mod arch;
 
 mod dummy;
 mod ffi;
+#[cfg(target_arch = "x86_64")]
 mod interrupt;
 mod memory;
 mod packet;
 mod trap_map;
 
-pub use arch::{check_hypervisor_feature, ArchRvmPageTable, Guest, Vcpu, VcpuState};
+pub use arch::{check_hypervisor_feature, ArchRvmPageTable, Guest, Vcpu};
+
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+pub use arch::VcpuState;
 pub use dummy::{DefaultGuestPhysMemorySet, GuestMemoryAttr};
 pub use memory::*;
 pub use packet::*;

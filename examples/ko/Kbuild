@@ -1,0 +1,20 @@
+MODE ?= release
+
+build_args := -Z build-std=core,alloc --target x86_64-linux-kernel
+rust_lib := $(src)/rust/target/x86_64-linux-kernel/$(MODE)/librvm_ko.a
+
+export c_flags
+
+ifeq ($(MODE), release)
+	build_args += --release
+endif
+
+ccflags-y := -I$(src) -I$(src)/include
+rvm-objs := rvm_module.o rvm.rust.o
+obj-m := rvm.o
+
+$(rust_lib): $(src)/rust/src/*.rs
+	cd $(src)/rust && cargo build $(build_args)
+
+$(src)/rvm.rust.o: $(rust_lib)
+	$(LD) -r -o $@ --whole-archive $<

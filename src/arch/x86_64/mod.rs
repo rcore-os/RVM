@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_wraps)]
+
 use raw_cpuid::CpuId;
 
 mod consts;

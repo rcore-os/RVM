@@ -1,6 +1,6 @@
 [package]
 name = "rvm"
-version = "1.0.1"
+version = "1.2.0"
 authors = ["equation314 <equation618@gmail.com>", "chenyu <believe.chenyu@gmail.com>"]
 edition = "2018"
 description = "Rcore virtual machine"
@@ -14,14 +14,14 @@ bitflags = "1.2"
 bit_field = "0.10"
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
 bit-set = { version = "0.5", default-features = false }
-bitmap-allocator = { git = "https://github.com/rcore-os/bitmap-allocator" }
+bitmap-allocator = { git = "https://github.com/rcore-os/bitmap-allocator", rev = "03bd990" }
 numeric-enum-macro = "0.2"
 rvm_macros = { path = "./rvm_macros" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-x86 = "0.33"
-x86_64 = "0.11"
-raw-cpuid = "8.0"
+x86 = "0.36"
+x86_64 = "0.13.2"
+raw-cpuid = "9.0"
 
 [target.'cfg(any(target_arch = "riscv32", target_arch = "riscv64"))'.dependencies]
 riscv = { git = "https://github.com/rcore-riscv-hypervisor-dev/riscv.git", rev = "180c1f4", features = ["inline-asm", "hypervisor"] }

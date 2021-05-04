@@ -2,7 +2,9 @@
 
 use bit_field::BitField;
 use x86::msr;
-use x86_64::registers::model_specific::Msr;
+use x86_64::registers::{control::Cr0Flags, model_specific::Msr};
+
+use super::vcpu::InterruptState;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
@@ -45,9 +47,15 @@ fn cr_is_valid(cr_value: u64, fixed0_msr: u32, fixed1_msr: u32) -> bool {
 }
 
 /// Check whether the CR0 has required fixed bits.
-pub(crate) fn cr0_is_valid(cr0_value: u64) -> bool {
+pub(crate) fn cr0_is_valid(cr0_value: u64, is_unrestricted_guest: bool) -> bool {
+    let mut check_value = cr0_value;
+    // From Volume 3, Section 26.3.1.1: PE and PG bits of CR0 are not checked when unrestricted
+    // guest is enabled. Set both here to avoid clashing with X86_MSR_IA32_VMX_CR0_FIXED1.
+    if is_unrestricted_guest {
+        check_value |= (Cr0Flags::PAGING | Cr0Flags::PROTECTED_MODE_ENABLE).bits();
+    }
     cr_is_valid(
-        cr0_value,
+        check_value,
         msr::IA32_VMX_CR0_FIXED0,
         msr::IA32_VMX_CR0_FIXED1,
     )
@@ -76,37 +84,46 @@ pub unsafe fn tr_base(tr: u16) -> u64 {
     tr_base
 }
 
-/// Call external interrupt handler manually without actually issuing interrupt
-pub unsafe fn manual_trap(vector: usize, error_code: usize) {
-    let target_addr = crate::ffi::x86_all_traps_handler_addr();
-    if target_addr == 0 {
-        return;
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct IDTGateEntry {
+    pointer_low: u16,
+    gdt_selector: u16,
+    options: u16,
+    pointer_middle: u16,
+    pointer_high: u32,
+    reserved: u32,
+}
+
+impl IDTGateEntry {
+    fn get_handler_addr(&self) -> u64 {
+        self.pointer_low as u64
+            | (self.pointer_middle as u64) << 16
+            | (self.pointer_high as u64) << 32
     }
+}
+
+/// Call external interrupt handler manually without actually issuing interrupt
+pub unsafe fn manual_trap(vector: u8, interrupt_state: &InterruptState) {
+    let entries: &'static [IDTGateEntry; 256] = core::mem::transmute(interrupt_state.host_idt_base);
+    let target_addr = entries[vector as usize].get_handler_addr();
     #[cfg(target_arch = "x86_64")]
     asm!("
-        mov r8, ss              # save ss -> r18
+        mov r8, ss              # save ss -> r8
         mov r9, rsp             # save rsp -> r9
         pushf
         pop r10                 # save rlags -> r10
         mov r11, cs             # save cs -> r11
-        lea rax, [rip + 1f]     # save return address -> rax
 
         push r8                 # ss
         push r9                 # rsp
         push r10                # rflags
         push r11                # cs
-        push rax                # rip
-        push {0}                # error_code
-        push {1}                # trap_num
-        jmp {2}
-1:",
-        in(reg) error_code,
-        in(reg) vector,
+        call {0}                # push rip and jmp",
         in(reg) target_addr,
         out("r8") _,
         out("r9") _,
         out("r10") _,
         out("r11") _,
-        out("rax") _,
     );
 }

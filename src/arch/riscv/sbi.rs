@@ -14,12 +14,14 @@ pub enum SBICall<'a> {
     SetTimer {
         time_value: u64,
     },
+    /*
     LegacyConsolePutchar {
         ch: u32,
     },
     LegacyConsoleGetchar {
         chr: &'a mut usize,
     },
+    */
     GetSpecVersion(SBIRet<'a>),
     GetSBIImplID(SBIRet<'a>),
     GetImplVersion(SBIRet<'a>),
@@ -50,6 +52,7 @@ pub const SBI_FID_GET_MARCHID: i32 = 5;
 pub const SBI_FID_GET_MIMPID: i32 = 6;
 
 pub const SBI_SET_TIMER: i32 = 0;
+/*
 pub const SBI_CONSOLE_PUTCHAR: i32 = 1;
 pub const SBI_CONSOLE_GETCHAR: i32 = 2;
 pub const SBI_CLEAR_IPI: i32 = 3;
@@ -58,6 +61,7 @@ pub const SBI_REMOTE_FENCE_I: i32 = 5;
 pub const SBI_REMOTE_SFENCE_VMA: i32 = 6;
 pub const SBI_REMOTE_SFENCE_VMA_ASID: i32 = 7;
 pub const SBI_SHUTDOWN: i32 = 8;
+*/
 
 #[cfg(target_arch = "riscv64")]
 fn get_first_u64_arg(ctx: &mut super::VMMContext) -> u64 {

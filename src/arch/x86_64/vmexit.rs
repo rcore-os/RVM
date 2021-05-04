@@ -3,16 +3,20 @@
 use alloc::sync::Arc;
 use bit_field::BitField;
 use core::convert::TryInto;
+use numeric_enum_macro::numeric_enum;
 use spin::Mutex;
-use x86_64::registers::model_specific::EferFlags;
+use x86::msr;
+use x86_64::registers::{control::Cr0Flags, model_specific::EferFlags};
 
 use super::feature::*;
+use super::msr::Msr;
 use super::structs::ExitReason;
-use super::utils::manual_trap;
+use super::utils::{cr0_is_valid, manual_trap};
 use super::vcpu::{GuestState, InterruptState};
 use super::vmcall::VmcallStatus;
 use super::vmcs::{
-    AutoVmcs, GuestRegisterAccessRights, InterruptibilityState, VmcsField16::*, VmcsField32::*,
+    AutoVmcs, GuestRegisterAccessRights, InterruptibilityState,
+    SecondaryCpuBasedVmExecControls as CpuCtrl2, VmEntryControls, VmcsField16::*, VmcsField32::*,
     VmcsField64::*, VmcsFieldXX::*,
 };
 use crate::memory::GuestPhysMemorySetTrait;
@@ -86,6 +90,34 @@ impl ExitInterruptionInfo {
     }
 }
 
+numeric_enum! {
+    #[repr(u8)]
+    #[derive(Debug)]
+    enum CrAccessType {
+        MovToCr = 0,
+        MovFromCr = 1,
+        CLTS = 2,
+        LMSW = 3,
+    }
+}
+
+#[derive(Debug)]
+struct CrAccessInfo {
+    cr_num: u8,
+    access_type: CrAccessType,
+    reg: u8,
+}
+
+impl CrAccessInfo {
+    fn from(qualification: usize) -> Self {
+        Self {
+            cr_num: qualification.get_bits(0..4) as u8,
+            access_type: (qualification.get_bits(4..6) as u8).try_into().unwrap(),
+            reg: qualification.get_bits(8..12) as u8,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct EptViolationInfo {
     read: bool,
@@ -130,16 +162,17 @@ fn handle_external_interrupt(vmcs: &AutoVmcs, interrupt_state: &mut InterruptSta
     debug_assert!(info.valid);
     debug_assert!(info.interruption_type == 0);
 
-    unsafe { manual_trap(info.vector as usize, 0) };
+    unsafe { manual_trap(info.vector, interrupt_state) };
 
-    use super::consts as int_num;
-    match info.vector - int_num::IRQ0 {
-        int_num::Timer => interrupt_state.timer_irq(),
-        int_num::COM1 => interrupt_state
+    use super::consts::{COM1, IRQ0};
+    if crate::ffi::is_host_timer_interrupt(info.vector) {
+        interrupt_state.timer_irq();
+    }
+    if crate::ffi::is_host_serial_interrupt(info.vector) {
+        interrupt_state
             .controller
-            .virtual_interrupt(info.vector as usize),
-        _ => {}
-    };
+            .virtual_interrupt((IRQ0 + COM1) as usize);
+    }
 
     Ok(None)
 }
@@ -364,6 +397,110 @@ fn handle_pause(exit_info: &ExitInfo, vmcs: &mut AutoVmcs) -> ExitResult {
     Ok(None)
 }
 
+fn handle_cr0_write(
+    val: Cr0Flags,
+    vmcs: &mut AutoVmcs,
+    interrupt_state: &mut InterruptState,
+) -> RvmResult {
+    // X86_CR0_NE is masked so that guests may write to it, but depending on
+    // IA32_VMX_CR0_FIXED0 it might be unsupported in VMX operation to set it to
+    // zero. Allow the guest to control its value in CR0_READ_SHADOW but not in
+    // GUEST_CR0 so that GUEST_CR0 stays valid.
+    let mut cr0 = val | Cr0Flags::NUMERIC_ERROR;
+    let is_unrestricted_guest =
+        CpuCtrl2::from_bits_truncate(vmcs.read32(SECONDARY_VM_EXEC_CONTROL))
+            .contains(CpuCtrl2::UNRESTRICTED_GUEST);
+    if !cr0_is_valid(cr0.bits(), is_unrestricted_guest) {
+        return Err(RvmError::InvalidParam);
+    }
+
+    // From Volume 3, Table 11-5: CD=0 and NW=1 is an invalid setting and should
+    // generate a GP fault.
+    if !val.contains(Cr0Flags::CACHE_DISABLE) && val.contains(Cr0Flags::NOT_WRITE_THROUGH) {
+        interrupt_state
+            .controller
+            .virtual_interrupt(super::consts::GeneralProtectionFault as usize);
+        return Ok(());
+    }
+
+    // From Volume 3, Section 26.3.2.1: CR0 is loaded from the CR0 field with the
+    // exception of the following bits, which are never modified on VM entry: ET
+    // (bit 4); reserved bits ...; NW (bit 29) and CD (bit 30). The values of
+    // these bits in the CR0 field are ignored.
+    //
+    // Even though these bits will be ignored on VM entry, to ensure that
+    // GUEST_CR0 matches the actual value of CR0 while the guest is running set
+    // those bits to match the host values. This is done only to make debugging
+    // simpler.
+    cr0.remove(Cr0Flags::CACHE_DISABLE | Cr0Flags::NOT_WRITE_THROUGH);
+    vmcs.writeXX(GUEST_CR0, cr0.bits() as usize);
+    // From Volume 3, Section 25.3: For each position corresponding to a bit clear
+    // in the CR0 guest/host mask, the destination operand is loaded with the
+    // value of the corresponding bit in CR0. For each position corresponding to a
+    // bit set in the CR0 guest/host mask, the destination operand is loaded with
+    // the value of the corresponding bit in the CR0 read shadow.
+    //
+    // Allow the guest to control the shadow.
+    vmcs.writeXX(CR0_READ_SHADOW, val.bits() as usize);
+
+    // From Volume 3, Section 26.3.1.1: If CR0.PG and EFER.LME are set then
+    // EFER.LMA and the IA-32e mode guest entry control must also be set.
+    let efer = EferFlags::from_bits_truncate(vmcs.read64(GUEST_IA32_EFER));
+    if !(efer.contains(EferFlags::LONG_MODE_ENABLE) && cr0.contains(Cr0Flags::PAGING)) {
+        return Ok(());
+    }
+    vmcs.write64(GUEST_IA32_EFER, (efer | EferFlags::LONG_MODE_ACTIVE).bits());
+    unsafe {
+        vmcs.set_control(
+            VM_ENTRY_CONTROLS,
+            Msr::new(msr::IA32_VMX_TRUE_ENTRY_CTLS).read(),
+            Msr::new(msr::IA32_VMX_ENTRY_CTLS).read(),
+            VmEntryControls::IA32E_MODE.bits(),
+            0,
+        )
+    }
+}
+
+fn handle_cr_access(
+    exit_info: &ExitInfo,
+    vmcs: &mut AutoVmcs,
+    guest_state: &mut GuestState,
+    interrupt_state: &mut InterruptState,
+) -> ExitResult {
+    let cr_info = CrAccessInfo::from(exit_info.exit_qualification);
+    match cr_info.access_type {
+        CrAccessType::MovToCr => {
+            if cr_info.cr_num != 0 {
+                return Err(RvmError::NotSupported);
+            }
+            let val = match cr_info.reg {
+                0 => guest_state.rax,
+                1 => guest_state.rcx,
+                2 => guest_state.rdx,
+                3 => guest_state.rbx,
+                4 => vmcs.readXX(GUEST_RSP) as u64,
+                5 => guest_state.rbp,
+                6 => guest_state.rsi,
+                7 => guest_state.rdi,
+                8 => guest_state.r8,
+                9 => guest_state.r9,
+                10 => guest_state.r10,
+                11 => guest_state.r11,
+                12 => guest_state.r12,
+                13 => guest_state.r13,
+                14 => guest_state.r14,
+                15 => guest_state.r15,
+                _ => return Err(RvmError::InvalidParam),
+            };
+
+            handle_cr0_write(Cr0Flags::from_bits_truncate(val), vmcs, interrupt_state)?;
+            exit_info.next_rip(vmcs);
+            Ok(None)
+        }
+        _ => Err(RvmError::NotSupported),
+    }
+}
+
 fn handle_io_instruction(
     exit_info: &ExitInfo,
     vmcs: &mut AutoVmcs,
@@ -569,6 +706,9 @@ pub fn vmexit_handler(
         ExitReason::CPUID => handle_cpuid(&exit_info, vmcs, guest_state),
         ExitReason::HLT => handle_hlt(&exit_info, vmcs),
         ExitReason::VMCALL => handle_vmcall(&exit_info, vmcs, guest_state),
+        ExitReason::CONTROL_REGISTER_ACCESS => {
+            handle_cr_access(&exit_info, vmcs, guest_state, interrupt_state)
+        }
         ExitReason::IO_INSTRUCTION => {
             handle_io_instruction(&exit_info, vmcs, guest_state, interrupt_state, traps)
         }
