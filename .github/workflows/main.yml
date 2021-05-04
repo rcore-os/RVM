@@ -32,12 +32,12 @@ jobs:
         profile: minimal
         toolchain: nightly-2021-03-01
         components: rust-src
-        target: x86_64-unknown-linux-gnu, riscv64imac-unknown-none-elf
+        target: riscv64imac-unknown-none-elf
     - name: Build x86_64
       uses: actions-rs/cargo@v1
       with:
         command: build
-        args: --target x86_64-unknown-linux-gnu --all-features
+        args: --all-features
     - name: Build RISC-V 64
       uses: actions-rs/cargo@v1
       with:
