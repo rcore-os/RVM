@@ -124,6 +124,43 @@ pub struct VMMContext {
 }
 
 impl VMMContext {
+    pub fn set(&mut self, reg: u8, v: usize) {
+        match reg {
+            0 => {}
+            1 => self.ra = v,
+            2 => self.sp = v,
+            3 => self.gp = v,
+            4 => self.tp = v,
+            5 => self.t0 = v,
+            6 => self.t1 = v,
+            7 => self.t2 = v,
+            8 => self.s0 = v,
+            9 => self.s1 = v,
+            10 => self.a0 = v,
+            11 => self.a1 = v,
+            12 => self.a2 = v,
+            13 => self.a3 = v,
+            14 => self.a4 = v,
+            15 => self.a5 = v,
+            16 => self.a6 = v,
+            17 => self.a7 = v,
+            18 => self.s2 = v,
+            19 => self.s3 = v,
+            20 => self.s4 = v,
+            21 => self.s5 = v,
+            22 => self.s6 = v,
+            23 => self.s7 = v,
+            24 => self.s8 = v,
+            25 => self.s9 = v,
+            26 => self.s10 = v,
+            27 => self.s11 = v,
+            28 => self.t3 = v,
+            29 => self.t4 = v,
+            30 => self.t5 = v,
+            31 => self.t6 = v,
+            _ => panic!("bad reg id."),
+        }
+    }
     pub fn get(&self, reg: u8) -> usize {
         match reg {
             0 => 0,

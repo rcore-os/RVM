@@ -27,12 +27,13 @@ pub fn get_trap_address(tvec: usize, cause: usize) -> Option<usize> {
     }
 }
 pub fn pass_down_exception(ctx: &mut VMMContext, cause: usize, tval: usize) {
-    // downgrade a specific exception.
+    // downgrade a specific exception. for example, downgrade VirtualInstruction to IllegalInstruction.
     let tvec = vstvec::read().bits();
     let trap_handler_pc = get_trap_address(tvec, cause).unwrap_or(tvec);
     let old_pc = ctx.sepc;
     ctx.sepc = trap_handler_pc;
     vsepc::write(old_pc);
+    unsafe { vscause::Vscause::from_bits(cause).write() };
     let previous_spp = sstatus::read().spp();
     match previous_spp {
         sstatus::SPP::Supervisor => unsafe {
@@ -75,4 +76,12 @@ pub fn init_traps() {
         del.write();
         del2.write();
     }
+    // enable hcounteren.
+    /*
+    unsafe {
+        hcounteren::set_cy();
+        hcounteren::set_tm();
+        hcounteren::set_ir();
+    }*/
+    // well qemu does not support these flags.
 }

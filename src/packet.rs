@@ -14,6 +14,8 @@ pub enum RvmExitPacketKind {
     GuestEcall = 1,
     GuestMmio = 3,
     GuestVcpu = 4,
+    #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+    GuestYield = 5,
 }
 
 #[repr(C)]
@@ -81,6 +83,14 @@ pub struct MmioPacket {
     pub dstreg: u8,
     pub extension: bool,
     pub insn: u32,
+    pub inst_len: u8,
+}
+
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct YieldPacket {
+    pub magic: u64,
 }
 
 #[repr(C)]
@@ -92,6 +102,8 @@ pub union RvmExitPacketInner {
     #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
     pub ecall: EcallPacket,
     pub mmio: MmioPacket,
+    #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+    pub yield_pack: YieldPacket,
 }
 
 #[repr(C)]
@@ -139,6 +151,16 @@ impl RvmExitPacket {
             inner: RvmExitPacketInner { mmio: mmio_packet },
         }
     }
+    #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+    pub fn new_yield_packet(key: u64, yield_packet: YieldPacket) -> Self {
+        Self {
+            kind: RvmExitPacketKind::GuestYield,
+            key,
+            inner: RvmExitPacketInner {
+                yield_pack: yield_packet,
+            },
+        }
+    }
 }
 
 impl Debug for RvmExitPacket {
@@ -154,6 +176,8 @@ impl Debug for RvmExitPacket {
                 #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
                 RvmExitPacketKind::GuestEcall => out.field("inner", &self.inner.ecall),
                 RvmExitPacketKind::GuestMmio => out.field("inner", &self.inner.mmio),
+                #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+                RvmExitPacketKind::GuestYield => out.field("inner", &self.inner.yield_pack),
                 _ => out.field("inner", &"Unknown"),
             };
         }

@@ -95,3 +95,6 @@ pub struct VcpuState {
 }
 
 pub use arch::VcpuIo;
+
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+pub use arch::InterruptState;
