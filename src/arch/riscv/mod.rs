@@ -160,6 +160,7 @@ impl Vcpu {
                 None => {
                     yield_counter += 1;
                     if yield_counter == 100 {
+                        self.state.privctx = VMMContextPriv::dump();
                         return Ok(RvmExitPacket::new_yield_packet(
                             0,
                             YieldPacket { magic: 100 },

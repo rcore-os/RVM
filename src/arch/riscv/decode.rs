@@ -149,6 +149,7 @@ pub fn read_instruction(epc: usize) -> Option<Insn> {
         let insn_32 = load_word(epc);
         Some(I(insn_32))
     } else {
+        error!("bad instruction: at epc {:x}: {}", epc, insn_16);
         None
     }
 }
