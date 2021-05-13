@@ -20,7 +20,7 @@ rvm_macros = { path = "./rvm_macros" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86 = "0.36"
-x86_64 = "0.13.2"
+x86_64 = "0.11.7"
 raw-cpuid = "9.0"
 
 [target.'cfg(any(target_arch = "riscv32", target_arch = "riscv64"))'.dependencies]
