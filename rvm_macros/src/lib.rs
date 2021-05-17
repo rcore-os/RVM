@@ -2,10 +2,8 @@ use proc_macro::TokenStream;
 use syn::{Abi, Attribute, ItemFn};
 
 const ALLOWED_FN_LIST: &[&str] = &[
-    "alloc_frame",
-    "dealloc_frame",
-    "alloc_frame_x4",
-    "dealloc_frame_x4",
+    "alloc_frames",
+    "dealloc_frames",
     "phys_to_virt",
     "is_host_timer_interrupt",
     "is_host_serial_interrupt",

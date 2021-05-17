@@ -486,9 +486,7 @@ impl Vcpu {
                 crate::ffi::riscv_trap_handler_no_frame(self.state.ctx.sepc);
                 return Ok(None);
             }
-            _ => {
-                panic!("Impossible arm {:?}.", cause)
-            }
+            _ => panic!("Impossible arm {:?}.", cause),
         }
         //Err(RvmError::Internal)
     }

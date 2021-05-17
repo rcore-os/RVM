@@ -1,23 +1,38 @@
 use crate::{HostPhysAddr, HostVirtAddr};
 
-/// Allocate physical frame
+/// Allocate contiguous physical frames
+/// RISC-V requires 16KB-aligned first level page table for GPA translation.
+pub fn alloc_frames(n: usize) -> Option<HostPhysAddr> {
+    unsafe { rvm_alloc_frames(n) }
+}
+
+/// Deallocate contiguous physical frames
+/// The page count `n` must match with allocation.
+pub fn dealloc_frames(paddr: HostPhysAddr, n: usize) {
+    unsafe { rvm_dealloc_frames(paddr, n) }
+}
+
+/// Allocate one physical frame
 pub fn alloc_frame() -> Option<HostPhysAddr> {
-    unsafe { rvm_alloc_frame() }
+    alloc_frames(1)
 }
 
-/// Deallocate physical frame
+/// Deallocate one physical frame
 pub fn dealloc_frame(paddr: HostPhysAddr) {
-    unsafe { rvm_dealloc_frame(paddr) }
+    dealloc_frames(paddr, 1)
 }
 
-// RISC-V requires 16KB-aligned first level page table for GPA translation.
+/// Allocate 4 contiguous physical frames
+/// RISC-V requires 16KB-aligned first level page table for GPA translation.
 #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
 pub fn alloc_frame_x4() -> Option<HostPhysAddr> {
-    unsafe { rvm_alloc_frame_x4() }
+    alloc_frames(4)
 }
+
+/// Deallocate 4 contiguous physical frames
 #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
 pub fn dealloc_frame_x4(paddr: HostPhysAddr) {
-    unsafe { rvm_dealloc_frame_x4(paddr) }
+    dealloc_frames(paddr, 4)
 }
 
 /// Convert physical address to virtual address
@@ -51,12 +66,8 @@ pub fn riscv_check_hypervisor_extension() -> bool {
 }
 
 extern "Rust" {
-    fn rvm_alloc_frame() -> Option<HostPhysAddr>;
-    fn rvm_dealloc_frame(_paddr: HostPhysAddr);
-    #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
-    fn rvm_alloc_frame_x4() -> Option<HostPhysAddr>;
-    #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
-    fn rvm_dealloc_frame_x4(_paddr: HostPhysAddr);
+    fn rvm_alloc_frames(_n: usize) -> Option<HostPhysAddr>;
+    fn rvm_dealloc_frames(_paddr: HostPhysAddr, _n: usize);
     fn rvm_phys_to_virt(_paddr: HostPhysAddr) -> HostVirtAddr;
 
     #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
