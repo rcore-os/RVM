@@ -8,23 +8,38 @@
 #![allow(clippy::upper_case_acronyms)]
 #![deny(warnings)]
 
+#[cfg(target_arch = "x86_64")]
 #[macro_use]
 extern crate alloc;
+
+#[cfg(not(target_arch = "x86_64"))]
+extern crate alloc;
+
 #[macro_use]
 extern crate log;
 
 #[cfg(target_arch = "x86_64")]
 #[path = "arch/x86_64/mod.rs"]
 mod arch;
+#[cfg(target_arch = "aarch64")]
+#[path = "arch/aarch64/mod.rs"]
+mod arch;
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+#[path = "arch/riscv/mod.rs"]
+mod arch;
+
 mod dummy;
 mod ffi;
+#[cfg(target_arch = "x86_64")]
 mod interrupt;
 mod memory;
 mod packet;
 mod trap_map;
 
-#[cfg(target_arch = "x86_64")]
 pub use arch::{check_hypervisor_feature, ArchRvmPageTable, Guest, Vcpu};
+
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+pub use arch::VcpuState;
 pub use dummy::{DefaultGuestPhysMemorySet, GuestMemoryAttr};
 pub use memory::*;
 pub use packet::*;
@@ -79,20 +94,7 @@ pub struct VcpuState {
     pub rflags: u64,
 }
 
-#[cfg(target_arch = "aarch64")]
-#[repr(C)]
-#[derive(Debug, Default)]
-pub struct VcpuState {
-    pub x: [u64; 31],
-    pub sp: u64,
-    pub cpsr: u64,
-    pub _padding1: [u8; 4],
-}
+pub use arch::VcpuIo;
 
-#[repr(C)]
-#[derive(Debug)]
-pub struct VcpuIo {
-    pub access_size: u8,
-    pub _padding1: [u8; 3],
-    pub data: [u8; 4],
-}
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+pub use arch::InterruptState;

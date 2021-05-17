@@ -1,6 +1,6 @@
 name: CI
 
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
   check:
@@ -10,7 +10,7 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly-2021-03-01
+        toolchain: nightly-2020-06-04
         override: true
         components: rustfmt, clippy
     - name: Check code format
@@ -30,13 +30,19 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly-2021-03-01
+        toolchain: nightly-2020-06-04
         components: rust-src
-    - name: Build
+        target: riscv64imac-unknown-none-elf
+    - name: Build x86_64
       uses: actions-rs/cargo@v1
       with:
         command: build
         args: --all-features
+    - name: Build RISC-V 64
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --target riscv64imac-unknown-none-elf --all-features
     - name: Build example UEFI
       run: cd examples/uefi && make build
     - name: Build example KO
@@ -54,7 +60,7 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly-2021-03-01
+        toolchain: nightly-2020-06-04
         components: rust-src
     - name: Test
       uses: actions-rs/cargo@v1
