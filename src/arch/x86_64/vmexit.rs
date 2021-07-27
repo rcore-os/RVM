@@ -726,7 +726,7 @@ pub fn vmexit_handler(
             "[RVM] VM exit handler for reason {:?} returned {:?}\n{}\nInstruction: {:02x?}",
             exit_info.exit_reason,
             res,
-            guest_state.dump(&vmcs),
+            guest_state.dump(vmcs),
             buf
         );
     }

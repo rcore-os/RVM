@@ -146,8 +146,7 @@ impl DefaultGuestPhysMemorySet {
         self.regions
             .lock()
             .iter()
-            .find(|region| region.is_overlap_with(start_paddr, end_paddr))
-            .is_none()
+            .any(|region| region.is_overlap_with(start_paddr, end_paddr))
     }
 
     /// Clear and unmap all regions.
