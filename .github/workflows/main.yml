@@ -10,7 +10,7 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly-2021-03-01
+        toolchain: nightly
         override: true
         components: rustfmt, clippy
     - name: Check code format
@@ -30,7 +30,7 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly-2021-03-01
+        toolchain: nightly
         components: rust-src
     - name: Build
       uses: actions-rs/cargo@v1
@@ -54,7 +54,7 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly-2021-03-01
+        toolchain: nightly
         components: rust-src
     - name: Test
       uses: actions-rs/cargo@v1
