@@ -743,7 +743,6 @@ extern "sysv64" {
 
 global_asm!(
     "
-.intel_syntax noprefix
 .global vmx_entry
 vmx_entry:
     // Store host callee save registers, return address, and processor flags to stack.

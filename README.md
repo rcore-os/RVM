@@ -6,6 +6,11 @@ An experimental hypervisor library written in Rust to build both type-1 and type
 
 Supported architecture: x86_64 (Intel VMX).
 
+## rustc info
+- current rustc -- rustc 1.56.0-nightly (08095fc1f 2021-07-26)
+- current rust-toolchain -- nightly
+ 
+
 ## Basic usage
 
 See the [UEFI example](examples/uefi/src/main.rs) for more details.
