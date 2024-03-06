@@ -1,3 +1,10 @@
+# DEPRECATED
+
+You can see recent projects in:
+
+* https://github.com/equation314/RVM-Tutorial
+* https://github.com/rcore-os/RVM1.5
+
 # RVM -- Rcore Virtual Machine
 
 [![CI](https://github.com/rcore-os/RVM/workflows/CI/badge.svg?branch=master)](https://github.com/rcore-os/RVM/actions)
